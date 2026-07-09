@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LogiTrack — Admin Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      #adminMap {
+        height: 650px;
+        width: 100%;
+      }
+      .map-legend {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 8px 0 14px;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12.5px;
+        color: var(--text-2);
+      }
+      .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .assign-select {
+        flex: 1;
+      }
+      .logout-btn-text {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #f87171;
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: var(--trans);
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 12px;
+      }
+      .logout-btn-text:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard-shell">
+      <!-- ═══ SIDEBAR ═══ -->
+      <aside class="sidebar">
+        <div class="sidebar-logo">
+          <div class="logo-text">LogiTrack</div>
+          <div class="logo-sub">Admin Panel</div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <div class="nav-section-title">Overview</div>
+          <button class="nav-item active" data-section="overview">
+            <img src="/icons/bar-chart.svg" class="icon" /><span
+              >Dashboard</span
+            >
+          </button>
+
+          <div class="nav-section-title">Management</div>
+          <button class="nav-item" data-section="drivers">
+            <img src="/icons/truck.svg" class="icon" /><span>Fleet</span>
+            <span class="nav-badge" id="sidebarDriverCount">0</span>
+          </button>
+          <button class="nav-item" data-section="deliveries">
+            <img src="/icons/package.svg" class="icon" /><span>Deliveries</span>
+            <span class="nav-badge" id="sidebarPendingCount">0</span>
+          </button>
+
+          <div class="nav-section-title">Live</div>
+          <button class="nav-item" data-section="tracking">
+            <img src="/icons/map.svg" class="icon" /><span>Live Map</span>
+            <span
+              class="live-badge"
+              style="font-size: 9px; padding: 2px 7px; margin-left: auto"
+              ><span class="live-dot"></span>LIVE</span
+            >
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-pill">
+            <div class="avatar" id="adminAvatar">AD</div>
+            <div class="user-pill-info">
+              <div class="user-pill-name" id="adminName">Admin</div>
+              <div class="user-pill-role" id="adminEmail">
+                admin@logistics.com
+              </div>
+            </div>
+          </div>
+          <button class="logout-btn-text" onclick="modal.open('logoutModal')">
+            <img
+              src="/icons/log-out.svg"
+              class="icon"
+              style="
+                filter: invert(53%) sepia(85%) saturate(3065%)
+                  hue-rotate(338deg) brightness(101%) contrast(97%);
+              "
+            />
+            Log Out
+          </button>
+        </div>
+      </aside>
+
+      <!-- ═══ MAIN ═══ -->
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <div class="topbar-title" id="topbarTitle">Dashboard Overview</div>
+            <div class="topbar-sub">
+              Real-time fleet logistics command centre
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+            <button class="btn btn-sm" id="refreshBtn" onclick="refreshAll()">
+              <img src="/icons/refresh-cw.svg" class="icon icon-sm" /> Refresh
+            </button>
+            <button
+              class="btn btn-primary btn-sm"
+              onclick="
+                openSection('drivers');
+                modal.open('addDriverModal');
+              "
+            >
+              <img src="/icons/truck.svg" class="icon icon-sm icon-white" /> Add
+              Truck
+            </button>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <!-- ══ OVERVIEW ══ -->
+          <section class="page-section active" id="section-overview">
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-icon blue">
+                  <img src="/icons/package.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-total">—</div>
+                <div class="stat-label">Total Deliveries</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon amber">
+                  <img src="/icons/clock.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-pending">—</div>
+                <div class="stat-label">Pending</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon teal">
+                  <img src="/icons/truck.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-active">—</div>
+                <div class="stat-label">In Transit</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon green">
+                  <img src="/icons/check-circle.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-completed">—</div>
+                <div class="stat-label">Delivered</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon blue">
+                  <img src="/icons/truck.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-drivers">—</div>
+                <div class="stat-label">Fleet Size</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon green">
+                  <img src="/icons/flag.svg" class="icon icon-white" />
+                </div>
+                <div class="stat-value" id="stat-online">—</div>
+                <div class="stat-label">Online Trucks</div>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="card">
+                <div class="flex-between mb-16 border-bottom pb-16">
+                  <div>
+                    <div class="card-title">Recent Deliveries</div>
+                    <div class="card-sub">
+                      Latest shipments across your fleet
+                    </div>
+                  </div>
+                  <button
+                    class="btn btn-sm"
+                    onclick="openSection('deliveries')"
+                  >
+                    View All
+                  </button>
+                </div>
+                <div id="recentDeliveriesList">
+                  <div
+                    class="skeleton"
+                    style="height: 44px; margin-bottom: 8px"
+                  ></div>
+                  <div
+                    class="skeleton"
+                    style="height: 44px; margin-bottom: 8px"
+                  ></div>
+                  <div class="skeleton" style="height: 44px"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="flex-between mb-16 border-bottom pb-16">
+                  <div>
+                    <div class="card-title">Fleet Status</div>
+                    <div class="card-sub">Driver online / offline states</div>
+                  </div>
+                  <button class="btn btn-sm" onclick="openSection('drivers')">
+                    View All
+                  </button>
+                </div>
+                <div id="overviewDriverList">
+                  <div
+                    class="skeleton"
+                    style="
+                      height: 64px;
+                      margin-bottom: 10px;
+                      border-radius: 10px;
+                    "
+                  ></div>
+                  <div
+                    class="skeleton"
+                    style="height: 64px; border-radius: 10px"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ══ FLEET ══ -->
+          <section class="page-section" id="section-drivers">
+            <div class="flex-between mb-16">
+              <div>
+                <h2 style="font-size: 20px; font-weight: 700">
+                  Fleet Management
+                </h2>
+                <div class="text-sm text-muted mt-4">
+                  Manage your trucks and drivers
+                </div>
+              </div>
+              <button
+                class="btn btn-primary"
+                onclick="modal.open('addDriverModal')"
+              >
+                <img src="/icons/truck.svg" class="icon icon-sm icon-white" />
+                Add Truck
+              </button>
+            </div>
+
+            <div class="filter-bar">
+              <div
+                class="chip active"
+                data-filter="all"
+                onclick="setDriverFilter('all')"
+              >
+                All
+              </div>
+              <div
+                class="chip"
+                data-filter="online"
+                onclick="setDriverFilter('online')"
+              >
+                🟢 Online
+              </div>
+              <div
+                class="chip"
+                data-filter="offline"
+                onclick="setDriverFilter('offline')"
+              >
+                ⚫ Offline
+              </div>
+            </div>
+
+            <div class="driver-grid" id="driversGrid">
+              <div
+                class="skeleton"
+                style="height: 180px; border-radius: 12px"
+              ></div>
+              <div
+                class="skeleton"
+                style="height: 180px; border-radius: 12px"
+              ></div>
+              <div
+                class="skeleton"
+                style="height: 180px; border-radius: 12px"
+              ></div>
+            </div>
+          </section>
+
+          <!-- ══ DELIVERIES ══ -->
+          <section class="page-section" id="section-deliveries">
+            <div class="flex-between mb-16">
+              <div>
+                <h2 style="font-size: 20px; font-weight: 700">
+                  Delivery Manifests
+                </h2>
+                <div class="text-sm text-muted mt-4">
+                  Assign trucks and manage all shipments
+                </div>
+              </div>
+            </div>
+
+            <div class="filter-bar" id="statusFilterChips">
+              <div
+                class="chip active"
+                data-status="all"
+                onclick="setStatusFilter('all')"
+              >
+                All
+              </div>
+              <div
+                class="chip"
+                data-status="pending"
+                onclick="setStatusFilter('pending')"
+              >
+                Pending
+              </div>
+              <div
+                class="chip"
+                data-status="assigned"
+                onclick="setStatusFilter('assigned')"
+              >
+                Assigned
+              </div>
+              <div
+                class="chip"
+                data-status="in_transit"
+                onclick="setStatusFilter('in_transit')"
+              >
+                In Transit
+              </div>
+              <div
+                class="chip"
+                data-status="delivered"
+                onclick="setStatusFilter('delivered')"
+              >
+                Delivered
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="table-container">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Tracking ID</th>
+                      <th>Customer</th>
+                      <th>Route</th>
+                      <th>Truck / Driver</th>
+                      <th>Status</th>
+                      <th>Priority</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deliveriesTableBody">
+                    <tr>
+                      <td
+                        colspan="8"
+                        style="
+                          text-align: center;
+                          padding: 40px;
+                          color: var(--text-3);
+                        "
+                      >
+                        Loading deliveries…
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- ══ LIVE MAP ══ -->
+          <section class="page-section" id="section-tracking">
+            <div class="flex-between mb-16">
+              <div>
+                <h2 style="font-size: 20px; font-weight: 700">
+                  Live Fleet Tracking
+                </h2>
+                <div class="text-sm text-muted mt-4">
+                  Real-time GPS positions of all active trucks
+                </div>
+              </div>
+              <span class="live-badge"
+                ><span class="live-dot"></span> Updating every 5s</span
+              >
+            </div>
+
+            <div
+              style="display: grid; grid-template-columns: 1fr 300px; gap: 20px"
+            >
+              <div>
+                <div class="map-legend">
+                  <div class="legend-item">
+                    <div
+                      class="legend-dot"
+                      style="background: var(--green)"
+                    ></div>
+                    Available
+                  </div>
+                  <div class="legend-item">
+                    <div
+                      class="legend-dot"
+                      style="background: var(--amber)"
+                    ></div>
+                    On Route
+                  </div>
+                  <div class="legend-item">
+                    <div
+                      class="legend-dot"
+                      style="background: var(--text-3)"
+                    ></div>
+                    Offline
+                  </div>
+                </div>
+                <div class="map-container">
+                  <div id="adminMap"></div>
+                </div>
+              </div>
+              <div class="card" style="align-self: start">
+                <div class="flex-between mb-16 border-bottom pb-16">
+                  <div class="card-title">Active Fleet</div>
+                  <span class="badge badge-online" id="onlineCount"
+                    >0 Online</span
+                  >
+                </div>
+                <div
+                  id="trackingDriverList"
+                  style="display: flex; flex-direction: column; gap: 10px"
+                ></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- ═══ MODALS ═══ -->
+
+    <!-- Logout Modal -->
+    <div class="modal-overlay" id="logoutModal">
+      <div class="modal" style="max-width: 350px">
+        <div class="modal-header border-bottom pb-12 mb-16">
+          <div class="modal-title">Sign Out</div>
+          <button class="modal-close" onclick="modal.close('logoutModal')">
+            ✕
+          </button>
+        </div>
+        <p
+          style="
+            color: var(--text-2);
+            margin-bottom: 24px;
+            font-size: 14px;
+            text-align: center;
+          "
+        >
+          Are you sure you want to sign out of LogiTrack?
+        </p>
+        <div class="flex-between" style="gap: 12px">
+          <button class="btn flex-1" onclick="modal.close('logoutModal')">
+            Cancel
+          </button>
+          <button class="btn btn-danger flex-1" onclick="logout()">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Driver -->
+    <div class="modal-overlay" id="addDriverModal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Add New Truck / Driver</div>
+          <button class="modal-close" onclick="modal.close('addDriverModal')">
+            ✕
+          </button>
+        </div>
+        <form id="addDriverForm">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Driver Name *</label>
+              <input
+                class="form-input"
+                type="text"
+                id="dName"
+                placeholder="Driver full name"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input
+                class="form-input"
+                type="tel"
+                id="dPhone"
+                placeholder="+91-9XXXXXXXXX"
+              />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email *</label>
+            <input
+              class="form-input"
+              type="email"
+              id="dEmail"
+              placeholder="driver@example.com"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input
+              class="form-input"
+              type="password"
+              id="dPassword"
+              placeholder="Default: driver123"
+            />
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">License Plate</label>
+              <input
+                class="form-input"
+                type="text"
+                id="dVehicleNumber"
+                placeholder="DL-01-AB-1234"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Vehicle Type</label>
+              <select class="form-select" id="dVehicleType">
+                <option value="van" selected>Van</option>
+                <option value="truck">Truck</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex-between mt-16" style="gap: 12px">
+            <button
+              type="button"
+              class="btn flex-1"
+              onclick="modal.close('addDriverModal')"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary flex-1"
+              id="addDriverBtn"
+            >
+              Add to Fleet
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Assign Driver -->
+    <div class="modal-overlay" id="assignDriverModal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Assign to Truck</div>
+          <button
+            class="modal-close"
+            onclick="modal.close('assignDriverModal')"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="assignDeliveryInfo" class="card mb-16 text-sm"></div>
+        <div class="form-group">
+          <label class="form-label">Select Available Truck</label>
+          <select class="form-select" id="assignDriverSelect">
+            <option value="">— Choose truck —</option>
+          </select>
+        </div>
+        <div class="flex-between" style="gap: 12px; margin-top: 16px">
+          <button class="btn flex-1" onclick="modal.close('assignDriverModal')">
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary flex-1"
+            onclick="confirmAssignDriver()"
+          >
+            Assign Truck
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delivery Detail -->
+    <div class="modal-overlay" id="deliveryDetailModal">
+      <div class="modal modal-lg">
+        <div class="modal-header">
+          <div class="modal-title">Delivery Details</div>
+          <button
+            class="modal-close"
+            onclick="modal.close('deliveryDetailModal')"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="deliveryDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- Delete Confirm -->
+    <div class="modal-overlay" id="deleteDriverModal">
+      <div class="modal" style="max-width: 400px">
+        <div class="modal-header">
+          <div class="modal-title">Remove from Fleet</div>
+          <button
+            class="modal-close"
+            onclick="modal.close('deleteDriverModal')"
+          >
+            ✕
+          </button>
+        </div>
+        <p style="color: var(--text-2); margin-bottom: 20px">
+          Are you sure you want to remove
+          <strong id="deleteDriverName"></strong>? This cannot be undone. Their
+          active deliveries will be returned to pending.
+        </p>
+        <div class="flex-between" style="gap: 12px">
+          <button class="btn flex-1" onclick="modal.close('deleteDriverModal')">
+            Cancel
+          </button>
+          <button class="btn btn-danger flex-1" onclick="confirmDeleteDriver()">
+            Remove Driver
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="/utils.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>

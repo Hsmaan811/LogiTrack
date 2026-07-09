@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogiTrack — Fleet Logistics Management</title>
+  <meta name="description" content="LogiTrack — Real-time fleet and freight logistics tracking platform.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="landing-bg">
+
+    <nav class="landing-nav">
+      <div class="landing-nav-logo">LogiTrack</div>
+      <div style="display:flex; gap:10px;">
+        <a href="/login.html" class="landing-cta-secondary" style="padding:9px 20px; font-size:13px;">Login</a>
+        <a href="/register.html" class="landing-cta-primary" style="padding:9px 20px; font-size:13px;">Get Started</a>
+      </div>
+    </nav>
+
+    <div class="landing-hero">
+      <h2>Fleet Logistics,<br><span>Tracked in Real-Time</span></h2>
+      <p>LogiTrack manages your truck fleet, delivery manifests, and live driver routes — all from one place. Know where every package is, the moment it moves.</p>
+      <div class="landing-ctas">
+        <a href="/login.html" class="landing-cta-primary">Open Dashboard</a>
+        <a href="#track" class="landing-cta-secondary" onclick="document.getElementById('track-section').scrollIntoView({behavior:'smooth'}); return false;">Track a Shipment</a>
+      </div>
+    </div>
+
+
+    <div class="track-panel" id="track-section">
+      <h3>Track Your Shipment</h3>
+      <p>Enter your tracking ID to get real-time status updates for your package.</p>
+      <div class="track-input-row">
+        <input type="text" id="publicTrackingId" class="track-input" placeholder="e.g. LT-ABC123-XYZ (found in your order email)" />
+        <button class="landing-cta-primary" onclick="trackPublicly()">Track Now</button>
+      </div>
+
+      <div id="trackResult" style="display:none;">
+        <div class="track-result-card">
+          <div class="flex-between mb-16">
+            <div>
+              <div style="font-size:11px; color:rgba(255,255,255,.4); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Tracking ID</div>
+              <div style="font-size:18px; font-weight:800; letter-spacing:-.5px;" id="trackIdDisplay"></div>
+            </div>
+            <div id="trackStatusBadge"></div>
+          </div>
+          <ul class="timeline" id="trackTimeline" style="border-color:rgba(255,255,255,.15);"></ul>
+        </div>
+      </div>
+      <div id="trackEmpty" style="display:none; padding:20px; text-align:center; color:rgba(255,255,255,.5);">
+        No shipment found with that tracking ID. Please double-check and try again.
+      </div>
+    </div>
+
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon"><img src="/icons/truck.svg" style="width:32px;height:32px;filter:invert(1);opacity:0.9;" /></div>
+        <div class="feature-title">Fleet Management</div>
+        <div class="feature-desc">Assign multiple deliveries to a single truck as a manifest. One truck, many packages — all tracked together.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><img src="/icons/map.svg" style="width:32px;height:32px;filter:invert(1);opacity:0.9;" /></div>
+        <div class="feature-title">Live GPS Tracking</div>
+        <div class="feature-desc">Drivers broadcast live locations. Admins see all trucks on a real-time map. Customers get milestone updates.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><img src="/icons/package.svg" style="width:32px;height:32px;filter:invert(1);opacity:0.9;" /></div>
+        <div class="feature-title">Order Management</div>
+        <div class="feature-desc">Customers place orders with pickup and dropoff coordinates. Orders go from pending to delivered with full history.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/utils.js"></script>
+  <script>
+    async function trackPublicly() {
+      const id = document.getElementById('publicTrackingId').value.trim();
+      if (!id) return;
+
+      document.getElementById('trackResult').style.display = 'none';
+      document.getElementById('trackEmpty').style.display = 'none';
+
+      try {
+        const data = await api.get(`/api/user/track/${encodeURIComponent(id)}`);
+        const delivery = data.delivery;
+        const events   = data.events || [];
+
+        document.getElementById('trackResult').style.display = 'block';
+        document.getElementById('trackIdDisplay').textContent = delivery.trackingId;
+
+        const statusColors = {
+          pending:'#f59e0b', assigned:'#3b82f6', in_transit:'#14b8a6',
+          delivered:'#22c55e', cancelled:'#ef4444'
+        };
+        const col = statusColors[delivery.status] || '#fff';
+        document.getElementById('trackStatusBadge').innerHTML =
+          `<span style="background:rgba(255,255,255,.12);color:#fff;padding:6px 14px;border-radius:99px;font-weight:700;font-size:13px;border:1px solid rgba(255,255,255,.2)">${delivery.status.replace(/_/g,' ').toUpperCase()}</span>`;
+
+        document.getElementById('trackTimeline').innerHTML = events.length
+          ? events.map(ev => `
+              <li class="timeline-item" style="--tl-col:${col}">
+                <div class="timeline-event" style="color:#fff">${ev.event.replace(/_/g,' ').toUpperCase()}</div>
+                <div class="timeline-desc" style="color:rgba(255,255,255,.6)">${ev.description}</div>
+                <div class="timeline-time">${new Date(ev.timestamp).toLocaleString('en-IN')}</div>
+              </li>`).join('')
+          : '<li style="color:rgba(255,255,255,.4);padding:10px 0">No events yet.</li>';
+      } catch {
+        document.getElementById('trackEmpty').style.display = 'block';
+      }
+    }
+
+    document.getElementById('publicTrackingId').addEventListener('keydown', e => {
+      if (e.key === 'Enter') trackPublicly();
+    });
+  </script>
+</body>
+</html>

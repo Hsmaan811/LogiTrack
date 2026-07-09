@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogiTrack — Register</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="auth-wrapper">
+    <div class="auth-card" style="max-width:460px;">
+      <div class="auth-logo">
+        <div class="auth-logo-icon">🚛</div>
+        <h1>Create Account</h1>
+        <p>Join LogiTrack to start shipping</p>
+      </div>
+
+      <div class="role-tabs" style="grid-template-columns:1fr 1fr;">
+        <div class="role-tab active" data-role="user" onclick="selectRole('user')">
+          <span class="role-tab-icon">📦</span>Customer
+        </div>
+        <div class="role-tab" data-role="driver" onclick="selectRole('driver')">
+          <span class="role-tab-icon">🚛</span>Driver
+        </div>
+      </div>
+
+      <form id="registerForm">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label" for="regName">Full Name</label>
+            <input class="form-input" type="text" id="regName" placeholder="John Doe" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="regPhone">Phone</label>
+            <input class="form-input" type="tel" id="regPhone" placeholder="+91-9XXXXXXXXX" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="regEmail">Email Address</label>
+          <input class="form-input" type="email" id="regEmail" placeholder="your@email.com" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="regPassword">Password</label>
+          <input class="form-input" type="password" id="regPassword" placeholder="Min. 6 characters" required minlength="6" />
+        </div>
+
+        <div id="driverFields" style="display:none;">
+          <div class="divider">Vehicle Info</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label" for="regVehicleNumber">License Plate</label>
+              <input class="form-input" type="text" id="regVehicleNumber" placeholder="DL-01-AB-1234" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="regVehicleType">Vehicle Type</label>
+              <select class="form-select" id="regVehicleType">
+                <option value="van" selected>Van</option>
+                <option value="truck">Truck</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="regBtn" style="margin-top:8px;">
+          Create Account
+        </button>
+      </form>
+
+      <div style="text-align:center; margin-top:20px; font-size:13px; color:var(--text-3);">
+        Already have an account? <a href="/login.html" style="color:var(--teal); font-weight:600;">Sign In</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/utils.js"></script>
+  <script>
+    let selectedRole = 'user';
+
+    function selectRole(role) {
+      selectedRole = role;
+      document.querySelectorAll('.role-tab').forEach(t => t.classList.toggle('active', t.dataset.role === role));
+      document.getElementById('driverFields').style.display = role === 'driver' ? 'block' : 'none';
+    }
+
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('regBtn');
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+
+      try {
+        const body = {
+          name:     document.getElementById('regName').value.trim(),
+          email:    document.getElementById('regEmail').value.trim(),
+          password: document.getElementById('regPassword').value,
+          phone:    document.getElementById('regPhone').value,
+          role:     selectedRole
+        };
+        if (selectedRole === 'driver') {
+          body.vehicleNumber = document.getElementById('regVehicleNumber').value;
+          body.vehicleType   = document.getElementById('regVehicleType').value;
+        }
+        const data = await api.post('/api/auth/register', body);
+        auth.save(data, data.token);
+        toast.success('Account created! Welcome to LogiTrack.');
+        setTimeout(() => {
+          window.location.href = data.role === 'driver' ? '/driver.html' : '/user.html';
+        }, 800);
+      } catch (err) {
+        toast.error(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
+      }
+    });
+  </script>
+</body>
+</html>
