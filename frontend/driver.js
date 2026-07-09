@@ -10,6 +10,10 @@ let simulationInterval = null;
 let simRoutePoints = [];
 let simCurrentIndex = 0;
 let driverMarker = null;
+let locationShareTimer = null;
+let routePreparedForDeliveryId = null;
+let simulationRunning = false;
+let routeOverlay = null;
 
 // ─── STATUS CONFIG ──────────────────────────────────────────────
 const STATUS_STEPS = [
@@ -50,10 +54,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initSidebarNav();
   window.onSectionChange = onSectionChange;
 
-  await loadActiveDelivery();
-  await loadAllDeliveries();
+  await Promise.all([loadActiveDelivery(), loadAllDeliveries()]);
 
   connectSocket();
+  if (driverUser && driverUser.isOnline) startLocationSharing();
 
   ['logoutModal'].forEach(id => modal.closeOnOverlay(id));
 });
@@ -75,6 +79,7 @@ function connectSocket() {
     api.put('/api/driver/availability', { isOnline: true }).catch(console.error);
     document.getElementById('onlineTrack').classList.add('on');
     setOnlineUI(true);
+    startLocationSharing();
   });
 
   socket.on('delivery:assigned', async (delivery) => {
@@ -83,8 +88,15 @@ function connectSocket() {
     await loadAllDeliveries();
   });
 
+  socket.on('driver:location-update', (data) => {
+    if (data?.lat != null && data?.lng != null) {
+      updateDriverMarker([data.lat, data.lng]);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('❌ Socket disconnected');
+    stopLocationSharing();
   });
 }
 
@@ -97,6 +109,8 @@ async function toggleOnlineStatus() {
     if (isOnline) track.classList.add('on');
     else track.classList.remove('on');
     setOnlineUI(isOnline);
+    if (isOnline) startLocationSharing();
+    else stopLocationSharing();
     toast.success(isOnline ? 'You are now online!' : 'You are offline');
   } catch (err) {
     toast.error(err.message);
@@ -130,14 +144,14 @@ async function loadActiveDelivery() {
     document.getElementById('activeDeliveryPanel').style.display = 'block';
 
     // Fill info
-    document.getElementById('currentTrackingId').textContent = delivery.trackingId;
-    document.getElementById('currentCustomer').textContent = delivery.user?.name || '—';
-    document.getElementById('currentPackage').textContent = delivery.packageDescription || '—';
-    document.getElementById('currentWeight').textContent = delivery.packageWeight || '—';
-    document.getElementById('currentPickup').textContent = delivery.pickup?.address || `${delivery.pickup?.lat}, ${delivery.pickup?.lng}`;
-    document.getElementById('currentDropoff').textContent = delivery.dropoff?.address || `${delivery.dropoff?.lat}, ${delivery.dropoff?.lng}`;
+    document.getElementById('currentTrackingId').textContent = activeDelivery.trackingId;
+    document.getElementById('currentCustomer').textContent = activeDelivery.user?.name || '—';
+    document.getElementById('currentPackage').textContent = activeDelivery.packageDescription || '—';
+    document.getElementById('currentWeight').textContent = activeDelivery.packageWeight || '—';
+    document.getElementById('currentPickup').textContent = activeDelivery.pickup?.address || `${activeDelivery.pickup?.lat}, ${activeDelivery.pickup?.lng}`;
+    document.getElementById('currentDropoff').textContent = activeDelivery.dropoff?.address || `${activeDelivery.dropoff?.lat}, ${activeDelivery.dropoff?.lng}`;
     const badgeContainer = document.getElementById('currentStatusBadgeContainer');
-    if (badgeContainer) badgeContainer.innerHTML = fmt.statusBadge(delivery.status);
+    if (badgeContainer) badgeContainer.innerHTML = fmt.statusBadge(activeDelivery.status);
 
     document.getElementById('topbarSub').textContent = activeDeliveries.length > 1
       ? `${activeDeliveries.length} active deliveries • #${activeDelivery.trackingId} — ${activeDelivery.packageDescription}`
@@ -158,8 +172,13 @@ async function loadActiveDelivery() {
     if (driverMap && activeDelivery.pickup && activeDelivery.dropoff) {
       buildRoute(activeDelivery);
     }
+
+    if (activeDelivery.pickup && activeDelivery.dropoff) {
+      void ensureSimulationRoute(activeDelivery);
+    }
   } catch (err) {
     console.error('Load active delivery error:', err);
+    document.getElementById('topbarSub').textContent = 'Unable to load active delivery';
   }
 }
 function renderStatusFlow(currentStatus) {
@@ -233,6 +252,104 @@ async function loadAllDeliveries() {
   } catch (err) { console.error(err); }
 }
 
+async function loadAllAssignments() {
+  return loadAllDeliveries();
+}
+
+function getSimulationPoints(delivery) {
+  const start = delivery?.pickup;
+  const end = delivery?.dropoff;
+  if (!start || !end) return [];
+
+  const points = [];
+  const steps = 40;
+  for (let i = 0; i <= steps; i += 1) {
+    const ratio = i / steps;
+    points.push({
+      lat: start.lat + (end.lat - start.lat) * ratio,
+      lng: start.lng + (end.lng - start.lng) * ratio
+    });
+  }
+  return points;
+}
+
+function estimateDistanceKm(start, end) {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(end.lat - start.lat);
+  const dLng = toRad(end.lng - start.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(start.lat)) * Math.cos(toRad(end.lat)) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function ensureSimulationRoute(delivery) {
+  if (!delivery || !delivery.pickup || !delivery.dropoff) return;
+  if (routePreparedForDeliveryId === delivery._id && simRoutePoints.length) return;
+
+  const fallbackPoints = getSimulationPoints(delivery);
+  if (!fallbackPoints.length) return;
+
+  routePreparedForDeliveryId = delivery._id;
+  simRoutePoints = fallbackPoints;
+  simCurrentIndex = 0;
+
+  const distanceKm = estimateDistanceKm(delivery.pickup, delivery.dropoff);
+  const durationMin = Math.max(1, Math.round((distanceKm / 30) * 60));
+
+  try {
+    await api.put(`/api/driver/deliveries/${delivery._id}/route`, {
+      waypoints: fallbackPoints,
+      distance: `${distanceKm.toFixed(1)} km`,
+      duration: `${durationMin} min`
+    });
+  } catch (err) {
+    console.warn('Fallback route save failed:', err.message);
+  }
+}
+
+function setSimulationRunningUI(isRunning) {
+  const startBtn = document.getElementById('startSimulationBtn');
+  const stopBtn = document.getElementById('stopSimulationBtn');
+  if (startBtn) {
+    startBtn.disabled = isRunning;
+    startBtn.innerHTML = isRunning ? '⏺ Running' : '▶ Start';
+  }
+  if (stopBtn) {
+    stopBtn.disabled = !isRunning;
+  }
+}
+
+function sendCurrentLocation() {
+  if (!navigator.geolocation) return;
+  if (!document.getElementById('onlineTrack')?.classList.contains('on')) return;
+
+  navigator.geolocation.getCurrentPosition((position) => {
+    api.put('/api/driver/location', {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude
+    }).catch((err) => console.warn('Location update failed:', err.message));
+  }, (err) => {
+    console.warn('Geolocation unavailable:', err.message);
+  }, {
+    enableHighAccuracy: true,
+    timeout: 10000,
+    maximumAge: 15000
+  });
+}
+
+function startLocationSharing() {
+  if (locationShareTimer || !navigator.geolocation) return;
+  sendCurrentLocation();
+  locationShareTimer = setInterval(sendCurrentLocation, 10000);
+}
+
+function stopLocationSharing() {
+  if (locationShareTimer) {
+    clearInterval(locationShareTimer);
+    locationShareTimer = null;
+  }
+}
+
 function renderQueue() {
   const el = document.getElementById('deliveryQueueList');
   if (!allDeliveries.length) {
@@ -270,12 +387,37 @@ function initDriverMap() {
   if (activeDelivery) buildRoute(activeDelivery);
 }
 
-function buildRoute(delivery) {
+async function buildRoute(delivery) {
   if (!driverMap) return;
+
+  void ensureSimulationRoute(delivery);
 
   if (routeControl) {
     driverMap.removeControl(routeControl);
     routeControl = null;
+  }
+
+  if (routeOverlay) {
+    driverMap.removeLayer(routeOverlay);
+    routeOverlay = null;
+  }
+
+  const cachedWaypoints = Array.isArray(delivery.routeWaypoints) ? delivery.routeWaypoints : [];
+  if (cachedWaypoints.length > 1) {
+    routeOverlay = L.polyline(cachedWaypoints.map(p => [p.lat, p.lng]), {
+      color: '#6366f1',
+      weight: 5,
+      opacity: 0.85
+    }).addTo(driverMap);
+
+    if (delivery.estimatedDistance) document.getElementById('routeDistance').textContent = delivery.estimatedDistance;
+    if (delivery.estimatedDuration) document.getElementById('routeDuration').textContent = delivery.estimatedDuration;
+
+    simRoutePoints = cachedWaypoints;
+    simCurrentIndex = 0;
+    routePreparedForDeliveryId = delivery._id;
+    addDriverMarker([delivery.pickup.lat, delivery.pickup.lng]);
+    return;
   }
 
   const pickup = [delivery.pickup.lat, delivery.pickup.lng];
@@ -336,10 +478,15 @@ function buildRoute(delivery) {
         // Store for simulation AFTER successful save to prevent race condition
         simRoutePoints = tempPoints;
         simCurrentIndex = 0;
+        routePreparedForDeliveryId = delivery._id;
       } catch (err) {
         console.error('Failed to save route to backend:', err);
       }
     }
+  });
+
+  routeControl.on('routingerror', function() {
+    console.warn('OSRM route unavailable, using fallback route');
   });
 
   // Add driver marker
@@ -363,44 +510,47 @@ function addDriverMarker(pos) {
   driverMarker = L.marker(pos, { icon }).addTo(driverMap).bindPopup('📍 You are here');
 }
 
+function updateDriverMarker(pos) {
+  if (!driverMap) return;
+  if (!driverMarker) {
+    addDriverMarker(pos);
+    return;
+  }
+
+  driverMarker.setLatLng(pos);
+  if (activeDelivery && activeDelivery.pickup && activeDelivery.dropoff) {
+    driverMap.panTo(pos, { animate: true, duration: 0.8 });
+  }
+}
+
 // ─── SIMULATION ──────────────────────────────────────────────────
 async function startSimulation() {
   if (!activeDelivery) {
     toast.warning('No active delivery to simulate');
     return;
   }
-  
-  // If route not built yet, build it first
+
+  setSimulationRunningUI(false);
+  toast.info('Preparing simulation route...');
+  await ensureSimulationRoute(activeDelivery);
+
   if (!simRoutePoints.length) {
-    toast.info('Building route first, please wait...');
-    // Go to map tab to trigger route build
-    const mapBtn = document.querySelector('[data-section="map"]');
-    if (mapBtn) mapBtn.click();
-    
-    // Wait for route to be calculated (up to 10s)
-    await new Promise(resolve => {
-      const check = setInterval(() => {
-        if (simRoutePoints.length > 0) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 500);
-      setTimeout(() => { clearInterval(check); resolve(); }, 10000);
-    });
-    
-    if (!simRoutePoints.length) {
-      toast.error('Route could not be calculated. Check pickup/dropoff coordinates.');
-      return;
-    }
+    toast.error('Route could not be prepared. Check pickup/dropoff coordinates.');
+    return;
   }
-  
+
+  setSimulationRunningUI(true);
   toast.info('Starting backend simulation — truck moving along route');
 
   try {
     const speed = parseInt(document.getElementById('simSpeed').value) || 3;
     await api.post(`/api/driver/deliveries/${activeDelivery._id}/simulate`, { speed });
+    simulationRunning = true;
+    setSimulationRunningUI(true);
     toast.success('Simulation running on server. You can safely close this tab or logout.');
   } catch (err) {
+    simulationRunning = false;
+    setSimulationRunningUI(false);
     toast.error('Simulation failed to start: ' + err.message);
   }
 }
@@ -408,6 +558,8 @@ async function startSimulation() {
 async function stopSimulation() {
   try {
     await api.post('/api/driver/simulate/stop');
+    simulationRunning = false;
+    setSimulationRunningUI(false);
     toast.success('Simulation stopped');
   } catch (err) {
     // ignore
@@ -443,6 +595,7 @@ function recalculateRoute() {
 
 function logout() {
   stopSimulation();
+  stopLocationSharing();
   if (socket) socket.disconnect();
   api.put('/api/driver/availability', { isOnline: false }).finally(() => {
     auth.clear();

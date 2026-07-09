@@ -105,12 +105,27 @@ router.put('/location', async (req, res) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to('admin_room').emit('driver:location-update', {
+      const updateData = {
         driverId: req.user._id,
         name: req.user.name,
+        vehicleType: req.user.vehicleType,
+        avatarColor: req.user.avatarColor,
         lat, lng,
         timestamp: new Date()
-      });
+      };
+
+      io.to('admin_room').emit('driver:location-update', updateData);
+      io.to(`driver_${req.user._id}`).emit('driver:location-update', updateData);
+
+      const activeDelivery = await Delivery.findOne({
+        driver: req.user._id,
+        status: { $in: ['assigned', 'picked_up', 'in_transit', 'out_for_delivery'] }
+      }).select('user');
+              io.to(`driver_${req.user._id}`).emit('driver:location-update', updateData);
+
+      if (activeDelivery?.user) {
+        io.to(`user_${activeDelivery.user}`).emit('driver:location-update', updateData);
+      }
     }
 
     res.json({ message: 'Location updated' });
@@ -202,6 +217,7 @@ router.post('/deliveries/:id/simulate', async (req, res) => {
           timestamp: new Date()
         };
         io.to('admin_room').emit('driver:location-update', updateData);
+        io.to(`driver_${driverId}`).emit('driver:location-update', updateData);
         if (delivery.user) {
           io.to(`user_${delivery.user}`).emit('driver:location-update', updateData);
         }

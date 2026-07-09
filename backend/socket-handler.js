@@ -48,9 +48,10 @@ const setupSocket = (io) => {
           timestamp: new Date()
         };
         io.to('admin_room').emit('driver:location-update', updateData);
+        io.to(`driver_${user._id}`).emit('driver:location-update', updateData);
         
         if (deliveryId) {
-          const Delivery = require('./delivery-model');
+        io.to(`driver_${driverId}`).emit('driver:location-update', updateData);
           const delivery = await Delivery.findById(deliveryId).select('user');
           if (delivery && delivery.user) {
             io.to(`user_${delivery.user}`).emit('driver:location-update', updateData);
