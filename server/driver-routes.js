@@ -21,6 +21,28 @@ const STATUS_EVENTS = {
   delivered: { event: 'delivered', description: 'Package has been delivered successfully!' }
 };
 
+async function fetchRouteFromOsrm(pickup, dropoff) {
+  const url = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?overview=full&geometries=geojson`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Routing service returned ${response.status}`);
+  }
+
+  const data = await response.json();
+  const route = data?.routes?.[0];
+  const coordinates = Array.isArray(route?.geometry?.coordinates) ? route.geometry.coordinates : [];
+
+  if (!coordinates.length) {
+    throw new Error('Routing service returned no coordinates');
+  }
+
+  return {
+    waypoints: coordinates.map(([lng, lat]) => ({ lat, lng })),
+    distance: `${(route.distance / 1000).toFixed(1)} km`,
+    duration: `${Math.max(1, Math.round(route.duration / 60))} min`
+  };
+}
+
 // @route GET /api/driver/deliveries
 router.get('/deliveries', async (req, res) => {
   try {
@@ -121,7 +143,6 @@ router.put('/location', async (req, res) => {
         driver: req.user._id,
         status: { $in: ['assigned', 'picked_up', 'in_transit', 'out_for_delivery'] }
       }).select('user');
-              io.to(`driver_${req.user._id}`).emit('driver:location-update', updateData);
 
       if (activeDelivery?.user) {
         io.to(`user_${activeDelivery.user}`).emit('driver:location-update', updateData);
@@ -141,7 +162,7 @@ router.put('/availability', async (req, res) => {
     const driver = await User.findByIdAndUpdate(
       req.user._id,
       { isOnline, isAvailable: isOnline },
-      { new: true }
+      { returnDocument: 'after' }
     ).select('-password');
 
     const io = req.app.get('io');
@@ -172,6 +193,19 @@ router.put('/deliveries/:id/route', async (req, res) => {
   }
 });
 
+// @route POST /api/driver/deliveries/:id/route/compute
+router.post('/deliveries/:id/route/compute', async (req, res) => {
+  try {
+    const delivery = await Delivery.findOne({ _id: req.params.id, driver: req.user._id });
+    if (!delivery) return res.status(404).json({ message: 'Delivery not found' });
+
+    const computedRoute = await fetchRouteFromOsrm(delivery.pickup, delivery.dropoff);
+    res.json(computedRoute);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Store active simulation intervals
 const activeSimulations = new Map();
 
@@ -180,13 +214,15 @@ router.post('/deliveries/:id/simulate', async (req, res) => {
   try {
     const delivery = await Delivery.findOne({ _id: req.params.id, driver: req.user._id });
     if (!delivery) return res.status(404).json({ message: 'Delivery not found' });
-    if (!delivery.routeWaypoints || delivery.routeWaypoints.length === 0) {
+    const clientWaypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : [];
+    const waypoints = clientWaypoints.length > 0 ? clientWaypoints : (delivery.routeWaypoints || []);
+
+    if (!waypoints.length) {
       return res.status(400).json({ message: 'Route not calculated yet' });
     }
 
     const driverId = req.user._id.toString();
     const io = req.app.get('io');
-    const waypoints = delivery.routeWaypoints;
     const name = req.user.name;
     const speed = req.body.speed || 3;
 

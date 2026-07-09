@@ -325,42 +325,15 @@
               </div>
             </div>
 
-            <div class="filter-bar" id="statusFilterChips">
-              <div
-                class="chip active"
-                data-status="all"
-                onclick="setStatusFilter('all')"
-              >
-                All
+            <div class="filter-bar flex-between" id="statusFilterChips">
+              <div style="display:flex; gap:8px;">
+                <div class="chip active" data-status="all" onclick="setStatusFilter('all')">All</div>
+                <div class="chip" data-status="pending" onclick="setStatusFilter('pending')">Pending</div>
+                <div class="chip" data-status="assigned" onclick="setStatusFilter('assigned')">Assigned</div>
+                <div class="chip" data-status="in_transit" onclick="setStatusFilter('in_transit')">In Transit</div>
+                <div class="chip" data-status="delivered" onclick="setStatusFilter('delivered')">Delivered</div>
               </div>
-              <div
-                class="chip"
-                data-status="pending"
-                onclick="setStatusFilter('pending')"
-              >
-                Pending
-              </div>
-              <div
-                class="chip"
-                data-status="assigned"
-                onclick="setStatusFilter('assigned')"
-              >
-                Assigned
-              </div>
-              <div
-                class="chip"
-                data-status="in_transit"
-                onclick="setStatusFilter('in_transit')"
-              >
-                In Transit
-              </div>
-              <div
-                class="chip"
-                data-status="delivered"
-                onclick="setStatusFilter('delivered')"
-              >
-                Delivered
-              </div>
+              <button class="btn btn-sm btn-primary" id="bulkAssignBtn" style="display:none;" onclick="openBulkAssignModal()">🔗 Assign Selected</button>
             </div>
 
             <div class="card">
@@ -368,6 +341,7 @@
                 <table class="table">
                   <thead>
                     <tr>
+                      <th style="width:40px;"><input type="checkbox" id="selectAllDeliveries" onchange="toggleAllDeliveries(this)" /></th>
                       <th>Tracking ID</th>
                       <th>Customer</th>
                       <th>Route</th>
@@ -602,11 +576,12 @@
           </select>
         </div>
         <div class="flex-between" style="gap: 12px; margin-top: 16px">
-          <button class="btn flex-1" onclick="modal.close('assignDriverModal')">
+          <button class="btn flex-1" onclick="modal.close('assignDriverModal')" id="cancelAssignBtn">
             Cancel
           </button>
           <button
             class="btn btn-primary flex-1"
+            id="confirmAssignBtn"
             onclick="confirmAssignDriver()"
           >
             Assign Truck

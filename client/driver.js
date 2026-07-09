@@ -3,7 +3,8 @@
 let driverUser = null;
 let driverMap = null;
 let routeControl = null;
-let activeDelivery = null;
+let activeDeliveries = [];   // all active deliveries
+let activeDelivery = null;   // the one currently shown in route map
 let allDeliveries = [];
 let socket = null;
 let simulationInterval = null;
@@ -13,7 +14,9 @@ let driverMarker = null;
 let locationShareTimer = null;
 let routePreparedForDeliveryId = null;
 let simulationRunning = false;
+let activeSimDeliveryId = null; // which delivery is being simulated
 let routeOverlay = null;
+let expandedCards = new Set(); // track which cards are expanded
 
 // ─── STATUS CONFIG ──────────────────────────────────────────────
 const STATUS_STEPS = [
@@ -63,9 +66,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function onSectionChange(section) {
-  const titles = { current: 'Current Delivery', queue: 'My Deliveries', map: 'Route Map' };
+  const titles = { current: 'Active Deliveries', queue: 'My Deliveries', map: 'Route Map' };
   document.getElementById('topbarTitle').textContent = titles[section] || section;
-  if (section === 'map') initDriverMap();
+  if (section === 'map') {
+    if (activeDelivery) initDriverMap();
+    else if (activeDeliveries.length) { activeDelivery = activeDeliveries[0]; initDriverMap(); }
+  }
 }
 
 // ─── SOCKET ─────────────────────────────────────────────────────
@@ -126,118 +132,212 @@ function setOnlineUI(isOnline) {
   badge.style.borderColor = isOnline ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
 }
 
-// ─── ACTIVE DELIVERY ────────────────────────────────────────────
+// ─── ACTIVE DELIVERIES (multi) ──────────────────────────────────
 async function loadActiveDelivery() {
   try {
-    const deliveries = await api.get('/api/driver/deliveries/active');
-    const activeDeliveries = Array.isArray(deliveries) ? deliveries : (deliveries ? [deliveries] : []);
+    const result = await api.get('/api/driver/deliveries/active');
+    activeDeliveries = Array.isArray(result) ? result : (result ? [result] : []);
     activeDelivery = activeDeliveries[0] || null;
 
-    if (!activeDelivery) {
-      document.getElementById('noActiveDelivery').style.display = 'block';
-      document.getElementById('activeDeliveryPanel').style.display = 'none';
-      document.getElementById('topbarSub').textContent = 'No active delivery';
+    const noDeliveryEl = document.getElementById('noActiveDelivery');
+    const container = document.getElementById('activeDeliveriesContainer');
+
+    if (!activeDeliveries.length) {
+      noDeliveryEl.style.display = 'block';
+      container.innerHTML = '';
+      document.getElementById('topbarSub').textContent = 'No active deliveries';
       return;
     }
 
-    document.getElementById('noActiveDelivery').style.display = 'none';
-    document.getElementById('activeDeliveryPanel').style.display = 'block';
+    noDeliveryEl.style.display = 'none';
+    document.getElementById('topbarSub').textContent =
+      activeDeliveries.length === 1
+        ? `#${activeDeliveries[0].trackingId} — ${activeDeliveries[0].packageDescription}`
+        : `${activeDeliveries.length} active deliveries`;
 
-    // Fill info
-    document.getElementById('currentTrackingId').textContent = activeDelivery.trackingId;
-    document.getElementById('currentCustomer').textContent = activeDelivery.user?.name || '—';
-    document.getElementById('currentPackage').textContent = activeDelivery.packageDescription || '—';
-    document.getElementById('currentWeight').textContent = activeDelivery.packageWeight || '—';
-    document.getElementById('currentPickup').textContent = activeDelivery.pickup?.address || `${activeDelivery.pickup?.lat}, ${activeDelivery.pickup?.lng}`;
-    document.getElementById('currentDropoff').textContent = activeDelivery.dropoff?.address || `${activeDelivery.dropoff?.lat}, ${activeDelivery.dropoff?.lng}`;
-    const badgeContainer = document.getElementById('currentStatusBadgeContainer');
-    if (badgeContainer) badgeContainer.innerHTML = fmt.statusBadge(activeDelivery.status);
+    renderActiveDeliveryCards(activeDeliveries);
 
-    document.getElementById('topbarSub').textContent = activeDeliveries.length > 1
-      ? `${activeDeliveries.length} active deliveries • #${activeDelivery.trackingId} — ${activeDelivery.packageDescription}`
-      : `#${activeDelivery.trackingId} — ${activeDelivery.packageDescription}`;
+    // Refresh map if open
+    if (driverMap && activeDelivery) buildRoute(activeDelivery);
 
-    renderStatusFlow(activeDelivery.status);
-    renderActionButton(activeDelivery.status);
-
-    // Show sim controls if in transit
-    const simEl = document.getElementById('simControls');
-    if (activeDelivery.status === 'picked_up' || activeDelivery.status === 'in_transit') {
-      simEl.style.display = 'block';
-    } else {
-      simEl.style.display = 'none';
-    }
-
-    // Init map if needed
-    if (driverMap && activeDelivery.pickup && activeDelivery.dropoff) {
-      buildRoute(activeDelivery);
-    }
-
-    if (activeDelivery.pickup && activeDelivery.dropoff) {
-      void ensureSimulationRoute(activeDelivery);
-    }
   } catch (err) {
     console.error('Load active delivery error:', err);
-    document.getElementById('topbarSub').textContent = 'Unable to load active delivery';
+    document.getElementById('topbarSub').textContent = 'Unable to load deliveries';
   }
 }
+
+function toggleDeliveryCard(id) {
+  if (expandedCards.has(id)) {
+    expandedCards.delete(id);
+  } else {
+    expandedCards.add(id);
+  }
+  renderActiveDeliveryCards(activeDeliveries);
+}
+
+function renderActiveDeliveryCards(deliveries) {
+  const container = document.getElementById('activeDeliveriesContainer');
+
+  container.innerHTML = deliveries.map((d, idx) => {
+    const isExpanded = expandedCards.has(d._id);
+    const canSim = ['picked_up', 'in_transit', 'out_for_delivery'].includes(d.status);
+    const isThisSim = activeSimDeliveryId === d._id;
+    const isDone = d.status === 'delivered' || d.status === 'cancelled';
+
+    const nextAction = {
+      assigned:         { label: 'Mark as Picked Up', emoji: '📦' },
+      picked_up:        { label: 'Start Transit',      emoji: '🚛' },
+      in_transit:       { label: 'Out for Delivery',   emoji: '🏃' },
+      out_for_delivery: { label: 'Mark as Delivered',  emoji: '✅' }
+    }[d.status];
+
+    const statusFlowHtml = STATUS_STEPS.map((step, i) => {
+      const curIdx = STATUS_STEPS.findIndex(s => s.key === d.status);
+      const isDoneStep = i < curIdx;
+      const isActiveStep = i === curIdx;
+      const connClass = isDoneStep ? 'done' : '';
+      return `
+        <div class="status-step">
+          <div class="step-node">
+            <div class="step-circle ${isDoneStep ? 'done' : isActiveStep ? 'active' : ''}">${step.icon}</div>
+            <div class="step-label ${isDoneStep ? 'done' : isActiveStep ? 'active' : ''}">${step.label}</div>
+          </div>
+          ${i < STATUS_STEPS.length - 1 ? `<div class="step-connector ${connClass}"></div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="card mb-16" id="dcard-${d._id}" style="border: 1px solid ${
+      isThisSim ? 'rgba(99,102,241,0.4)' : 'var(--border)'
+    };">
+
+      <!-- Card Header -->
+      <div class="flex-between" style="cursor:pointer; padding-bottom: ${isExpanded ? '16px' : '0'}; ${isExpanded ? 'border-bottom:1px solid var(--border); margin-bottom:16px;' : ''}" onclick="toggleDeliveryCard('${d._id}')">
+        <div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="font-semibold text-accent" style="font-size:14px;">#${d.trackingId}</span>
+            ${fmt.statusBadge(d.status)}
+            ${isThisSim ? '<span class="badge" style="background:rgba(99,102,241,0.15);color:#6366f1;border:1px solid rgba(99,102,241,0.3);font-size:10px;">🔴 SIM</span>' : ''}
+          </div>
+          <div class="text-xs text-muted mt-4">${d.packageDescription} • ${d.user?.name || 'N/A'}</div>
+        </div>
+        <div style="font-size:18px; color:var(--text-3); transition:transform 0.2s; transform:rotate(${isExpanded ? '90' : '0'}deg);">›</div>
+      </div>
+
+      <!-- Expanded Body -->
+      ${isExpanded ? `
+        <!-- Status Flow: centred, not edge-to-edge -->
+        <div style="display:flex; justify-content:center; margin-bottom:20px;">
+          <div class="status-flow" style="max-width:520px; width:100%;">${statusFlowHtml}</div>
+        </div>
+
+        <!-- Info: clean labelled rows with a subtle divider -->
+        <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:16px; font-size:13px;">
+          <div style="display:flex; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border);">
+            <span style="color:var(--text-3); font-weight:500;">Customer</span>
+            <span style="font-weight:600;">${d.user?.name || '—'}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border);">
+            <span style="color:var(--text-3); font-weight:500;">Package</span>
+            <span style="font-weight:600;">${d.packageDescription || '—'}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border);">
+            <span style="color:var(--text-3); font-weight:500;">Weight</span>
+            <span style="font-weight:600;">${d.packageWeight || '—'}</span>
+          </div>
+          <div style="padding:10px 14px; border-bottom:1px solid var(--border);">
+            <div style="color:var(--text-3); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Pickup</div>
+            <div style="font-weight:600;">${d.pickup?.address || `${d.pickup?.lat}, ${d.pickup?.lng}`}</div>
+          </div>
+          <div style="padding:10px 14px; ">
+            <div style="color:var(--text-3); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Dropoff</div>
+            <div style="font-weight:600;">${d.dropoff?.address || `${d.dropoff?.lat}, ${d.dropoff?.lng}`}</div>
+            ${d.estimatedDistance ? `<div style="display:inline-flex; align-items:center; gap:5px; margin-top:6px; padding:3px 10px; background:rgba(13,148,136,0.12); border:1px solid rgba(13,148,136,0.25); border-radius:20px; font-size:12px; font-weight:600; color:var(--teal);">🗺️ ${d.estimatedDistance} &bull; ${d.estimatedDuration}</div>` : ''}
+          </div>
+        </div>
+
+        <!-- Advance Status -->
+        ${!isDone && nextAction ? `
+        <button class="btn btn-primary btn-full" id="advBtn-${d._id}" onclick="advanceDeliveryStatusFor('${d._id}')" style="margin-bottom:10px;">
+          ${nextAction.emoji} ${nextAction.label}
+        </button>` : ''}
+        ${isDone ? `<div class="text-xs text-muted" style="text-align:center; padding:8px;">Delivery ${d.status}.</div>` : ''}
+
+        <!-- Simulation Controls -->
+        ${canSim ? `
+        <div class="sim-controls" style="margin-top:4px; margin-bottom:10px;">
+          <div style="font-size:11px; font-weight:700; color:#92400e; margin-bottom:8px; text-transform:uppercase;">Dev Mode — Simulate Truck</div>
+          <div style="display:flex; gap:8px;">
+            <select id="simSpeed-${d._id}" class="form-select" style="padding:4px 8px; font-size:12px; width:90px; flex-shrink:0;">
+              <option value="1">1x Slow</option>
+              <option value="3" selected>3x Normal</option>
+              <option value="10">10x Fast</option>
+            </select>
+            <button class="btn btn-sm flex-1" id="startSimBtn-${d._id}" onclick="startSimulationFor('${d._id}')">
+              ${isThisSim ? '⏺ Running' : '▶ Start'}
+            </button>
+            <button class="btn btn-sm flex-1" onclick="stopSimulation()">&#9632; Stop All</button>
+          </div>
+        </div>` : ''}
+
+        <!-- Divider -->
+        <div style="border-top:1px solid var(--border); margin:12px 0;"></div>
+
+        <!-- View Route Button -->
+        <button class="btn btn-sm btn-full" onclick="viewRouteFor('${d._id}')">
+          🗺️ View on Route Map
+        </button>
+      ` : ''}
+    </div>`;
+  }).join('');
+}
+
 function renderStatusFlow(currentStatus) {
   const currentIdx = STATUS_STEPS.findIndex(s => s.key === currentStatus);
   const html = STATUS_STEPS.map((step, i) => {
     const isDone = i < currentIdx;
     const isActive = i === currentIdx;
-    const circleClass = isDone ? 'done' : isActive ? 'active' : '';
-    const labelClass = isDone ? 'done' : isActive ? 'active' : '';
     const connClass = i < currentIdx ? 'done' : '';
-
     return `
       <div class="status-step">
         <div class="step-node">
-          <div class="step-circle ${circleClass}">${step.icon}</div>
-          <div class="step-label ${labelClass}">${step.label}</div>
+          <div class="step-circle ${isDone ? 'done' : isActive ? 'active' : ''}">${step.icon}</div>
+          <div class="step-label ${isDone ? 'done' : isActive ? 'active' : ''}">${step.label}</div>
         </div>
         ${i < STATUS_STEPS.length - 1 ? `<div class="step-connector ${connClass}"></div>` : ''}
       </div>
     `;
   }).join('');
-
-  document.getElementById('statusFlow').innerHTML = html;
+  return html;
 }
 
-function renderActionButton(status) {
-  const btn = document.getElementById('nextActionBtn');
-  if (status === 'delivered' || status === 'cancelled') {
-    btn.disabled = true;
-    btn.innerHTML = '✅ Delivery Complete';
-    return;
-  }
-  const action = NEXT_ACTION_LABELS[status];
-  if (action) {
-    btn.disabled = false;
-    btn.innerHTML = `<span>${action.emoji}</span> ${action.label}`;
-  }
-}
-
-// ─── ADVANCE STATUS ──────────────────────────────────────────────
-async function advanceDeliveryStatus() {
-  if (!activeDelivery) return;
-  const btn = document.getElementById('nextActionBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<span>⏳</span> Updating...';
+async function advanceDeliveryStatusFor(deliveryId) {
+  const btn = document.getElementById(`advBtn-${deliveryId}`);
+  if (btn) btn.disabled = true;
 
   try {
-    const updated = await api.put(`/api/driver/deliveries/${activeDelivery._id}/status`, {});
-    activeDelivery = updated;
-    toast.success(`Status updated: ${updated.status.replace('_', ' ')} ✅`);
-    if (updated.status === 'delivered' || updated.status === 'cancelled') {
-      stopSimulation();
+    const updated = await api.put(`/api/driver/deliveries/${deliveryId}/status`, {});
+    
+    // Update local state
+    const idx = activeDeliveries.findIndex(d => d._id === deliveryId);
+    if (idx !== -1) {
+      activeDeliveries[idx] = updated;
     }
-    await loadActiveDelivery();
+
+    toast.success(`Status updated: ${updated.status.replace('_', ' ')} ✅`);
+    
+    if (updated.status === 'delivered' || updated.status === 'cancelled') {
+      if (activeSimDeliveryId === deliveryId) {
+        stopSimulation();
+      }
+      activeDeliveries = activeDeliveries.filter(d => d._id !== deliveryId);
+    }
+    
+    renderActiveDeliveryCards(activeDeliveries);
     await loadAllDeliveries();
   } catch (err) {
     toast.error(err.message);
-    btn.disabled = false;
-    renderActionButton(activeDelivery.status);
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -254,6 +354,16 @@ async function loadAllDeliveries() {
 
 async function loadAllAssignments() {
   return loadAllDeliveries();
+}
+
+function setRouteSummary({ distance, duration, status }) {
+  const distanceEl = document.getElementById('routeDistance');
+  const durationEl = document.getElementById('routeDuration');
+  const statusEl = document.getElementById('routeStatus');
+
+  if (distanceEl) distanceEl.textContent = distance || '—';
+  if (durationEl) durationEl.textContent = duration || '—';
+  if (statusEl) statusEl.textContent = status || '—';
 }
 
 function getSimulationPoints(delivery) {
@@ -273,6 +383,37 @@ function getSimulationPoints(delivery) {
   return points;
 }
 
+function getRouteCache(delivery) {
+  const waypoints = Array.isArray(delivery?.routeWaypoints) ? delivery.routeWaypoints : [];
+  return waypoints.length > 1 ? waypoints : [];
+}
+
+async function fetchRouteFromService(delivery) {
+  return api.post(`/api/driver/deliveries/${delivery._id}/route/compute`);
+}
+
+async function resolveRoute(delivery) {
+  const cachedWaypoints = getRouteCache(delivery);
+  if (cachedWaypoints.length) {
+    return {
+      waypoints: cachedWaypoints,
+      distance: delivery.estimatedDistance || null,
+      duration: delivery.estimatedDuration || null
+    };
+  }
+
+  try {
+    return await fetchRouteFromService(delivery);
+  } catch (err) {
+    console.warn('Route service unavailable, using fallback route', err.message);
+    return {
+      waypoints: getSimulationPoints(delivery),
+      distance: null,
+      duration: null
+    };
+  }
+}
+
 function estimateDistanceKm(start, end) {
   const toRad = (value) => (value * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -280,31 +421,6 @@ function estimateDistanceKm(start, end) {
   const dLng = toRad(end.lng - start.lng);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(start.lat)) * Math.cos(toRad(end.lat)) * Math.sin(dLng / 2) ** 2;
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function ensureSimulationRoute(delivery) {
-  if (!delivery || !delivery.pickup || !delivery.dropoff) return;
-  if (routePreparedForDeliveryId === delivery._id && simRoutePoints.length) return;
-
-  const fallbackPoints = getSimulationPoints(delivery);
-  if (!fallbackPoints.length) return;
-
-  routePreparedForDeliveryId = delivery._id;
-  simRoutePoints = fallbackPoints;
-  simCurrentIndex = 0;
-
-  const distanceKm = estimateDistanceKm(delivery.pickup, delivery.dropoff);
-  const durationMin = Math.max(1, Math.round((distanceKm / 30) * 60));
-
-  try {
-    await api.put(`/api/driver/deliveries/${delivery._id}/route`, {
-      waypoints: fallbackPoints,
-      distance: `${distanceKm.toFixed(1)} km`,
-      duration: `${durationMin} min`
-    });
-  } catch (err) {
-    console.warn('Fallback route save failed:', err.message);
-  }
 }
 
 function setSimulationRunningUI(isRunning) {
@@ -387,10 +503,22 @@ function initDriverMap() {
   if (activeDelivery) buildRoute(activeDelivery);
 }
 
+function focusRouteOnMap(points) {
+  if (!driverMap || !Array.isArray(points) || points.length === 0) return;
+  const bounds = L.latLngBounds(points.map(point => [point.lat, point.lng]));
+  if (bounds.isValid()) {
+    driverMap.fitBounds(bounds.pad(0.18), { animate: true });
+  }
+}
+
 async function buildRoute(delivery) {
   if (!driverMap) return;
 
-  void ensureSimulationRoute(delivery);
+  setRouteSummary({
+    distance: 'Calculating…',
+    duration: 'Calculating…',
+    status: `Loading route for #${delivery.trackingId || delivery._id}`
+  });
 
   if (routeControl) {
     driverMap.removeControl(routeControl);
@@ -402,95 +530,81 @@ async function buildRoute(delivery) {
     routeOverlay = null;
   }
 
-  const cachedWaypoints = Array.isArray(delivery.routeWaypoints) ? delivery.routeWaypoints : [];
-  if (cachedWaypoints.length > 1) {
-    routeOverlay = L.polyline(cachedWaypoints.map(p => [p.lat, p.lng]), {
+  const resolvedRoute = await resolveRoute(delivery);
+  const resolvedWaypoints = resolvedRoute.waypoints || [];
+
+  if (resolvedWaypoints.length > 1) {
+    routeOverlay = L.polyline(resolvedWaypoints.map(p => [p.lat, p.lng]), {
       color: '#6366f1',
       weight: 5,
       opacity: 0.85
     }).addTo(driverMap);
 
-    if (delivery.estimatedDistance) document.getElementById('routeDistance').textContent = delivery.estimatedDistance;
-    if (delivery.estimatedDuration) document.getElementById('routeDuration').textContent = delivery.estimatedDuration;
+    setRouteSummary({
+      distance: resolvedRoute.distance || '—',
+      duration: resolvedRoute.duration || '—',
+      status: `Previewing route for #${delivery.trackingId || delivery._id}`
+    });
 
-    simRoutePoints = cachedWaypoints;
+    simRoutePoints = resolvedWaypoints;
     simCurrentIndex = 0;
     routePreparedForDeliveryId = delivery._id;
     addDriverMarker([delivery.pickup.lat, delivery.pickup.lng]);
+    focusRouteOnMap(resolvedWaypoints);
+
+    if (!getRouteCache(delivery).length) {
+      try {
+        await api.put(`/api/driver/deliveries/${delivery._id}/route`, {
+          waypoints: resolvedWaypoints,
+          distance: resolvedRoute.distance,
+          duration: resolvedRoute.duration
+        });
+      } catch (err) {
+        console.warn('Route save failed:', err.message);
+      }
+    }
     return;
   }
 
-  const pickup = [delivery.pickup.lat, delivery.pickup.lng];
-  const dropoff = [delivery.dropoff.lat, delivery.dropoff.lng];
-
-  routeControl = L.Routing.control({
-    router: L.Routing.osrmv1({
-      serviceUrl: 'https://routing.openstreetmap.de/routed-car/route/v1'
-    }),
-    waypoints: [L.latLng(...pickup), L.latLng(...dropoff)],
-    routeWhileDragging: false,
-    addWaypoints: false,
-    createMarker: function(i, wp) {
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="
-          width:36px;height:36px;border-radius:50%;
-          background:${i === 0 ? '#10b981' : '#ef4444'};
-          border:3px solid white;
-          display:flex;align-items:center;justify-content:center;
-          color:white;font-size:16px;
-          box-shadow:0 2px 10px rgba(0,0,0,0.4);
-        ">${i === 0 ? '📍' : '🏁'}</div>`,
-        iconSize: [36, 36], iconAnchor: [18, 18]
-      });
-      return L.marker(wp.latLng, { icon })
-        .bindPopup(i === 0 ? `<b>Pickup</b><br>${delivery.pickup.address || ''}` : `<b>Dropoff</b><br>${delivery.dropoff.address || ''}`);
-    },
-    lineOptions: {
-      styles: [{ color: '#6366f1', weight: 5, opacity: 0.8 }]
-    },
-    show: false,
-    fitSelectedRoutes: true,
-    collapsible: true
+  const fallbackWaypoints = getSimulationPoints(delivery);
+  if (!fallbackWaypoints.length) return;
+  routeOverlay = L.polyline(fallbackWaypoints.map(p => [p.lat, p.lng]), {
+    color: '#6366f1',
+    weight: 5,
+    opacity: 0.85,
+    dashArray: '8 10'
   }).addTo(driverMap);
-
-  routeControl.on('routesfound', async function(e) {
-    const routes = e.routes;
-    if (routes.length) {
-      const r = routes[0];
-      const dist = (r.summary.totalDistance / 1000).toFixed(1) + ' km';
-      const dur = Math.round(r.summary.totalTime / 60) + ' min';
-      document.getElementById('routeDistance').textContent = dist;
-      document.getElementById('routeDuration').textContent = dur;
-
-      const tempPoints = r.coordinates.map(c => [c.lat, c.lng]);
-
-      // Save route to server — thin to max 300 waypoints (smoother simulation)
-      const step = Math.max(1, Math.floor(tempPoints.length / 300));
-      const thinWaypoints = tempPoints.filter((_, i) => i % step === 0);
-      try {
-        await api.put(`/api/driver/deliveries/${delivery._id}/route`, {
-          waypoints: thinWaypoints.map(p => ({ lat: p[0], lng: p[1] })),
-          distance: dist,
-          duration: dur
-        });
-        
-        // Store for simulation AFTER successful save to prevent race condition
-        simRoutePoints = tempPoints;
-        simCurrentIndex = 0;
-        routePreparedForDeliveryId = delivery._id;
-      } catch (err) {
-        console.error('Failed to save route to backend:', err);
-      }
-    }
+  simRoutePoints = fallbackWaypoints;
+  simCurrentIndex = 0;
+  routePreparedForDeliveryId = delivery._id;
+  setRouteSummary({
+    distance: delivery.estimatedDistance || `${estimateDistanceKm(delivery.pickup, delivery.dropoff).toFixed(1)} km`,
+    duration: delivery.estimatedDuration || '—',
+    status: `Previewing fallback route for #${delivery.trackingId || delivery._id}`
   });
+  addDriverMarker([delivery.pickup.lat, delivery.pickup.lng]);
+  focusRouteOnMap(fallbackWaypoints);
+}
 
-  routeControl.on('routingerror', function() {
-    console.warn('OSRM route unavailable, using fallback route');
-  });
+async function viewRouteFor(deliveryId) {
+  const delivery = activeDeliveries.find(d => d._id === deliveryId) || allDeliveries.find(d => d._id === deliveryId);
+  if (!delivery) {
+    toast.warning('Delivery not found');
+    return;
+  }
 
-  // Add driver marker
-  addDriverMarker(pickup);
+  activeDelivery = delivery;
+
+  const mapTab = document.querySelector('[data-section="map"]');
+  if (mapTab) {
+    mapTab.click();
+  } else if (!driverMap) {
+    initDriverMap();
+  }
+
+  if (driverMap) {
+    await buildRoute(delivery);
+  }
 }
 
 function addDriverMarker(pos) {
@@ -523,43 +637,77 @@ function updateDriverMarker(pos) {
   }
 }
 
-// ─── SIMULATION ──────────────────────────────────────────────────
-async function startSimulation() {
-  if (!activeDelivery) {
-    toast.warning('No active delivery to simulate');
+// ─── SIMULATION (per delivery, only one at a time) ──────────────
+async function startSimulationFor(deliveryId) {
+  const delivery = activeDeliveries.find(d => d._id === deliveryId);
+  if (!delivery) { toast.warning('Delivery not found'); return; }
+
+  // Auto-stop any running sim first (backend handles this too, but good UX)
+  if (activeSimDeliveryId && activeSimDeliveryId !== deliveryId) {
+    toast.info('Stopping previous simulation...');
+    await stopSimulation();
+  }
+
+  // Ensure route exists before starting the backend simulation.
+  let routePoints = getRouteCache(delivery);
+  if (!routePoints.length) {
+    try {
+      const resolvedRoute = await resolveRoute(delivery);
+      routePoints = resolvedRoute.waypoints || [];
+      if (routePoints.length > 1) {
+        simRoutePoints = routePoints;
+        simCurrentIndex = 0;
+        routePreparedForDeliveryId = delivery._id;
+        await api.put(`/api/driver/deliveries/${delivery._id}/route`, {
+          waypoints: routePoints,
+          distance: resolvedRoute.distance,
+          duration: resolvedRoute.duration
+        });
+      }
+    } catch (err) {
+      toast.error('Route lookup failed: ' + err.message);
+      return;
+    }
+  }
+
+  if (!routePoints.length) {
+    toast.error('Route not available yet');
     return;
   }
 
-  setSimulationRunningUI(false);
-  toast.info('Preparing simulation route...');
-  await ensureSimulationRoute(activeDelivery);
+  simRoutePoints = routePoints;
+  simCurrentIndex = 0;
+  routePreparedForDeliveryId = delivery._id;
 
-  if (!simRoutePoints.length) {
-    toast.error('Route could not be prepared. Check pickup/dropoff coordinates.');
-    return;
-  }
-
-  setSimulationRunningUI(true);
-  toast.info('Starting backend simulation — truck moving along route');
+  const speed = parseInt(document.getElementById(`simSpeed-${deliveryId}`)?.value || '3');
 
   try {
-    const speed = parseInt(document.getElementById('simSpeed').value) || 3;
-    await api.post(`/api/driver/deliveries/${activeDelivery._id}/simulate`, { speed });
+    await api.post(`/api/driver/deliveries/${deliveryId}/simulate`, {
+      speed,
+      waypoints: routePoints
+    });
+    activeSimDeliveryId = deliveryId;
     simulationRunning = true;
-    setSimulationRunningUI(true);
-    toast.success('Simulation running on server. You can safely close this tab or logout.');
+    // Re-render so the SIM badge shows up
+    renderActiveDeliveryCards(activeDeliveries);
+    toast.success(`Simulation started for #${delivery.trackingId}. You can log out — server keeps driving.`);
   } catch (err) {
-    simulationRunning = false;
-    setSimulationRunningUI(false);
-    toast.error('Simulation failed to start: ' + err.message);
+    toast.error('Simulation failed: ' + err.message);
   }
+}
+
+// Legacy wrapper
+async function startSimulation() {
+  if (activeDelivery) return startSimulationFor(activeDelivery._id);
+  toast.warning('No active delivery selected');
 }
 
 async function stopSimulation() {
   try {
     await api.post('/api/driver/simulate/stop');
+    activeSimDeliveryId = null;
     simulationRunning = false;
-    setSimulationRunningUI(false);
+    renderActiveDeliveryCards(activeDeliveries);
     toast.success('Simulation stopped');
   } catch (err) {
     // ignore

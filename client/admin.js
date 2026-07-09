@@ -12,6 +12,7 @@ let currentStatusFilter = 'all';
 let currentDriverFilter = 'all';
 let socket = null;
 let adminRouteLines = [];
+let selectedDeliveryIds = new Set();
 
 // ─── Init ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -317,8 +318,13 @@ function renderDeliveries() {
     return;
   }
 
-  tbody.innerHTML = filtered.map(d => `
+  tbody.innerHTML = filtered.map(d => {
+    const canAssign = d.status === 'pending' || d.status === 'assigned';
+    return `
     <tr onclick="openDeliveryDetail('${d._id}')">
+      <td>
+        ${canAssign ? `<input type="checkbox" class="delivery-cb" value="${d._id}" ${selectedDeliveryIds.has(d._id) ? 'checked' : ''} onchange="toggleDeliverySelection(this, '${d._id}')" onclick="event.stopPropagation()" />` : ''}
+      </td>
       <td><span class="font-semibold text-accent">${d.trackingId}</span></td>
       <td>
         <div class="flex-center gap-8">
@@ -352,16 +358,44 @@ function renderDeliveries() {
         </div>
       </td>
     </tr>
-  `).join('');
+    `;
+  }).join('');
 }
 
-function filterDeliveries() { renderDeliveries(); }
+function toggleAllDeliveries(checkbox) {
+  const cbs = document.querySelectorAll('.delivery-cb');
+  cbs.forEach(cb => {
+    cb.checked = checkbox.checked;
+    if (checkbox.checked) selectedDeliveryIds.add(cb.value);
+    else selectedDeliveryIds.delete(cb.value);
+  });
+  updateBulkAssignButton();
+}
+
+function toggleDeliverySelection(checkbox, id) {
+  if (checkbox.checked) selectedDeliveryIds.add(id);
+  else selectedDeliveryIds.delete(id);
+  updateBulkAssignButton();
+}
+
+function updateBulkAssignButton() {
+  const btn = document.getElementById('bulkAssignBtn');
+  if (selectedDeliveryIds.size > 0) {
+    btn.style.display = 'block';
+    btn.innerHTML = `🔗 Assign Selected (${selectedDeliveryIds.size})`;
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function filterDeliveries() { renderDeliveries(); updateBulkAssignButton(); }
 function setStatusFilter(status) {
   currentStatusFilter = status;
   document.querySelectorAll('#statusFilterChips .chip').forEach(c => {
     c.classList.toggle('active', c.dataset.status === status);
   });
   renderDeliveries();
+  updateBulkAssignButton();
 }
 
 // ─── Assign Driver ─────────────────────────────────────────────
@@ -377,8 +411,25 @@ async function openAssignDriver(deliveryId) {
       <div class="info-row"><span class="info-label">Package</span><span class="info-value">${delivery.packageDescription}</span></div>
     </div>
   `;
+  populateAvailableDrivers();
+  modal.open('assignDriverModal');
+}
 
-  // Populate available drivers
+async function openBulkAssignModal() {
+  if (selectedDeliveryIds.size === 0) return;
+  activeDeliveryId = 'bulk';
+  document.getElementById('assignDeliveryInfo').innerHTML = `
+    <div style="text-align:center; padding:10px;">
+      <div style="font-size:24px; margin-bottom:10px;">📦</div>
+      <div style="font-size:16px; font-weight:700;">Assign ${selectedDeliveryIds.size} Deliveries</div>
+      <div style="color:var(--text-3); font-size:13px; margin-top:4px;">You are assigning multiple deliveries to a single truck as a manifest.</div>
+    </div>
+  `;
+  populateAvailableDrivers();
+  modal.open('assignDriverModal');
+}
+
+function populateAvailableDrivers() {
   const available = allDrivers.filter(d => d.isOnline && d.isAvailable);
   const select = document.getElementById('assignDriverSelect');
   select.innerHTML = '<option value="">— Choose driver —</option>';
@@ -388,20 +439,46 @@ async function openAssignDriver(deliveryId) {
     option.textContent = `${d.isOnline ? '🟢' : '⚫'} ${d.name} — ${fmt.vehicleIcon(d.vehicleType)} ${d.vehicleType} (${d.activeDeliveries} active)`;
     select.appendChild(option);
   });
-
-  modal.open('assignDriverModal');
 }
 
 async function confirmAssignDriver() {
   const driverId = document.getElementById('assignDriverSelect').value;
   if (!driverId) { toast.warning('Please select a driver'); return; }
 
+  const confirmBtn = document.getElementById('confirmAssignBtn');
+  const cancelBtn = document.getElementById('cancelAssignBtn');
+  
+  // Visual Loading State
+  confirmBtn.disabled = true;
+  cancelBtn.disabled = true;
+  const originalText = confirmBtn.innerHTML;
+  confirmBtn.innerHTML = '<span>⏳</span> Assigning...';
+
   try {
-    await api.put(`/api/admin/deliveries/${activeDeliveryId}/assign`, { driverId });
+    const idsToAssign = activeDeliveryId === 'bulk' ? Array.from(selectedDeliveryIds) : [activeDeliveryId];
+    
+    // Assign sequentially (to avoid hammering the server if there are many)
+    for (const id of idsToAssign) {
+      await api.put(`/api/admin/deliveries/${id}/assign`, { driverId });
+    }
+    
+    // Clear selection
+    selectedDeliveryIds.clear();
+    const selectAllCb = document.getElementById('selectAllDeliveries');
+    if (selectAllCb) selectAllCb.checked = false;
+    updateBulkAssignButton();
+    
     modal.close('assignDriverModal');
-    toast.success('Driver assigned! 🎉');
+    toast.success(`🎉 Successfully assigned ${idsToAssign.length} deliveries!`);
     await loadDeliveries(); await loadStats();
-  } catch (err) { toast.error(err.message); }
+  } catch (err) { 
+    toast.error(err.message); 
+  } finally {
+    // Reset button state
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    confirmBtn.innerHTML = originalText;
+  }
 }
 
 // ─── Delivery Detail Modal ─────────────────────────────────────

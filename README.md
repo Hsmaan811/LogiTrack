@@ -1,6 +1,7 @@
 # Logistics Tracker
 
 A full-stack, real-time fleet logistics tracking platform that utilizes Socket.IO and Leaflet.js to seamlessly synchronize delivery workflows between administrators, drivers, and customers.
+
 ## Features
 
 - Admin dashboard for managing drivers, deliveries, and live tracking
@@ -89,6 +90,8 @@ npm start
 ```
 
 5. Open the app in your browser:
+
+If port 5000 is already in use, the server will automatically try the next available port and print the final URL in the terminal.
 
 - Admin: `http://localhost:5000/admin.html`
 - Driver: `http://localhost:5000/driver.html`

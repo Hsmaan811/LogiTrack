@@ -127,84 +127,22 @@
         </div>
       </div>
 
-      <!-- CURRENT DELIVERY -->
+      <!-- CURRENT DELIVERIES (multi) -->
       <section class="page-section active" id="section-current">
-        <div id="activeDeliveryPanel" style="display:none;">
-          <!-- Status Pipeline -->
-          <div class="card mb-16">
-            <div class="flex-between mb-16 border-bottom pb-16">
-              <div class="card-title">Delivery Progress</div>
-              <div id="currentStatusBadgeContainer"><span class="badge">—</span></div>
-            </div>
-            <div class="status-flow" id="statusFlow"></div>
-          </div>
 
-          <div class="form-grid">
-            <!-- Delivery Info -->
-            <div class="card">
-              <div class="card-title border-bottom pb-16 mb-16">Delivery Info</div>
-              <div style="display:flex; flex-direction:column; gap:10px; font-size:13px;">
-                <div class="flex-between">
-                  <span style="color:var(--text-3);">Tracking ID</span>
-                  <span class="font-600" id="currentTrackingId">—</span>
-                </div>
-                <div class="flex-between">
-                  <span style="color:var(--text-3);">Customer</span>
-                  <span class="font-600" id="currentCustomer">—</span>
-                </div>
-                <div class="flex-between">
-                  <span style="color:var(--text-3);">Package</span>
-                  <span class="font-600" id="currentPackage">—</span>
-                </div>
-                <div class="flex-between">
-                  <span style="color:var(--text-3);">Weight</span>
-                  <span class="font-600" id="currentWeight">—</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Route -->
-            <div class="card">
-              <div class="card-title border-bottom pb-16 mb-16">Route Details</div>
-              <div style="font-size:11px; color:var(--text-3); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Pickup</div>
-              <div class="font-600 mb-16" id="currentPickup">—</div>
-              <div style="font-size:11px; color:var(--text-3); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Dropoff</div>
-              <div class="font-600 mb-16" id="currentDropoff">—</div>
-              <div class="route-stats">
-                <div class="route-stat">
-                  <div class="route-stat-val" id="routeDistance">—</div>
-                  <div class="route-stat-lbl">Distance</div>
-                </div>
-                <div class="route-stat">
-                  <div class="route-stat-val" id="routeDuration">—</div>
-                  <div class="route-stat-lbl">Est. Time</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Action Button -->
-          <div class="card mt-16">
-            <button class="btn btn-primary btn-full btn-lg" id="nextActionBtn" onclick="advanceDeliveryStatus()">
-              Loading action…
-            </button>
-
-            <!-- Test Simulation -->
-            <div class="sim-controls" id="simControls" style="display:none;">
-              <div style="font-size:11px; font-weight:700; color:#92400e; margin-bottom:10px; text-transform:uppercase;">Dev Mode — Simulate Truck</div>
-              <div style="display:flex; gap:10px;">
-                <select id="simSpeed" class="form-select" style="padding:4px 8px; font-size:12px; width:70px; flex-shrink:0;">
-                  <option value="1">1x (Slow)</option>
-                  <option value="3" selected>3x (Normal)</option>
-                  <option value="10">10x (Fast)</option>
-                </select>
-                <button class="btn btn-sm flex-1" id="startSimulationBtn" onclick="startSimulation()">▶ Start</button>
-                <button class="btn btn-sm flex-1" id="stopSimulationBtn" onclick="stopSimulation()">■ Stop</button>
-                <button class="btn btn-sm flex-1" onclick="addCheckpoint()">+ Checkpoint</button>
-              </div>
-            </div>
+        <!-- Empty state -->
+        <div id="noActiveDelivery" style="display:none;">
+          <div class="card" style="text-align:center; padding:60px;">
+            <div style="margin-bottom:16px;"><img src="/icons/truck.svg" style="width:48px;height:48px;opacity:0.3;" /></div>
+            <div style="font-size:20px; font-weight:700; margin-bottom:8px;">No Active Deliveries</div>
+            <div style="color:var(--text-3); margin-bottom:24px;">Toggle Online in the sidebar to start receiving assignments from the Admin.</div>
+            <button class="btn btn-primary" onclick="loadActiveDelivery()">Check for New Assignments</button>
           </div>
         </div>
+
+        <!-- Active delivery cards rendered by JS -->
+        <div id="activeDeliveriesContainer"></div>
+
       </section>
 
       <!-- ALL ASSIGNMENTS -->
@@ -226,6 +164,20 @@
         <div class="flex-between mb-16">
           <h2 style="font-size:20px;font-weight:700;">Route Map</h2>
           <button class="btn btn-sm" onclick="recalculateRoute()">Recalculate Route</button>
+        </div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+          <div class="card" style="padding:12px 14px; min-width:150px; flex:1;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-3); font-weight:700; margin-bottom:4px;">Distance</div>
+            <div id="routeDistance" style="font-size:18px; font-weight:700;">—</div>
+          </div>
+          <div class="card" style="padding:12px 14px; min-width:150px; flex:1;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-3); font-weight:700; margin-bottom:4px;">Duration</div>
+            <div id="routeDuration" style="font-size:18px; font-weight:700;">—</div>
+          </div>
+          <div class="card" style="padding:12px 14px; min-width:220px; flex:2;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-3); font-weight:700; margin-bottom:4px;">Route Status</div>
+            <div id="routeStatus" style="font-size:15px; font-weight:600; color:var(--text-2);">Select a delivery to preview its route</div>
+          </div>
         </div>
         <div class="map-container">
           <div id="driverMap"></div>

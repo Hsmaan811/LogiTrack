@@ -45,10 +45,44 @@ app.use((req, res) => {
 // Setup Socket.IO
 setupSocket(io);
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(` Logistics Tracker running at http://localhost:${PORT}`);
-  console.log(` Admin:  http://localhost:${PORT}/admin.html`);
-  console.log(` Driver: http://localhost:${PORT}/driver.html`);
-  console.log(` User:   http://localhost:${PORT}/user.html`);
-});
+const DEFAULT_PORT = Number(process.env.PORT) || 5000;
+
+function listenOnPort(port) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off('listening', onListening);
+      if (error.code === 'EADDRINUSE') {
+        resolve(null);
+        return;
+      }
+      reject(error);
+    };
+
+    const onListening = () => {
+      server.off('error', onError);
+      resolve(port);
+    };
+
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port);
+  });
+}
+
+(async () => {
+  for (let port = DEFAULT_PORT; port < DEFAULT_PORT + 10; port += 1) {
+    const activePort = await listenOnPort(port);
+    if (activePort) {
+      console.log(` Logistics Tracker running at http://localhost:${activePort}`);
+      console.log(` Admin:  http://localhost:${activePort}/admin.html`);
+      console.log(` Driver: http://localhost:${activePort}/driver.html`);
+      console.log(` User:   http://localhost:${activePort}/user.html`);
+      return;
+    }
+
+    console.warn(` Port ${port} is already in use, trying ${port + 1}...`);
+  }
+
+  console.error(` Unable to start the server: ports ${DEFAULT_PORT}-${DEFAULT_PORT + 9} are already in use.`);
+  process.exit(1);
+})();

@@ -1153,16 +1153,25 @@ body {
 .status-flow {
   display: flex;
   align-items: center;
-  overflow-x: auto;
+  width: 100%;
   padding: 8px 0;
   gap: 0;
+}
+.status-step {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.status-step:last-child {
+  flex: 0 0 auto;
 }
 .step-node {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  min-width: 90px;
+  flex-shrink: 0;
 }
 .step-circle {
   width: 32px;
@@ -1195,6 +1204,7 @@ body {
   font-weight: 600;
   text-align: center;
   color: var(--text-3);
+  white-space: nowrap;
 }
 .step-label.done,
 .step-label.active {
@@ -1204,7 +1214,8 @@ body {
   flex: 1;
   height: 2px;
   background: var(--border);
-  min-width: 24px;
+  min-width: 12px;
+  margin: 0 4px;
 }
 .step-connector.done {
   background: var(--teal);
