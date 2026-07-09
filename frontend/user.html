@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LogiTrack — Customer Portal</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      #orderMap {
+        height: 400px;
+        width: 100%;
+      }
+      #trackMap {
+        height: 400px;
+        width: 100%;
+      }
+      .order-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: var(--trans);
+      }
+      .order-card:hover {
+        border-color: var(--teal);
+        box-shadow: var(--shadow);
+      }
+      .order-card.tracking {
+        border-color: var(--teal);
+        background: var(--teal-faint);
+      }
+
+      .track-search-bar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 24px;
+      }
+      .notif-banner {
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: var(--radius);
+        padding: 14px 18px;
+        margin: 0 28px 0;
+        display: none;
+        animation: notif-slide-in 0.3s ease;
+      }
+      @keyframes notif-slide-in {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .map-instruction {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: var(--radius);
+        padding: 10px 14px;
+        font-size: 12px;
+        color: #1e40af;
+        margin-bottom: 12px;
+      }
+      .order-info-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .info-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .info-item:last-child {
+        border-bottom: none;
+      }
+      .logout-btn-text {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #f87171;
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: var(--trans);
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 12px;
+      }
+      .logout-btn-text:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="sidebar-logo">
+          <div class="logo-text">LogiTrack</div>
+          <div class="logo-sub">Customer Portal</div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <div class="nav-section-title">My Shipments</div>
+          <button class="nav-item active" data-section="orders">
+            <img src="/icons/package.svg" class="icon" /><span>My Orders</span>
+            <span class="nav-badge" id="activeOrderCount">0</span>
+          </button>
+          <button class="nav-item" data-section="track">
+            <img src="/icons/map.svg" class="icon" /><span>Track Package</span>
+          </button>
+
+          <div class="nav-section-title">New</div>
+          <button class="nav-item" data-section="place-order">
+            <img
+              src="/icons/check-circle.svg"
+              class="icon"
+              style="transform: rotate(45deg)"
+            /><span>Place Order</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-pill">
+            <div class="avatar" id="userAvatar">U</div>
+            <div class="user-pill-info">
+              <div class="user-pill-name" id="userName">User</div>
+              <div class="user-pill-role" id="userEmail">—</div>
+            </div>
+          </div>
+          <button class="logout-btn-text" onclick="modal.open('logoutModal')">
+            <img
+              src="/icons/log-out.svg"
+              class="icon"
+              style="
+                filter: invert(53%) sepia(85%) saturate(3065%)
+                  hue-rotate(338deg) brightness(101%) contrast(97%);
+              "
+            />
+            Log Out
+          </button>
+        </div>
+      </aside>
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <div class="topbar-title" id="topbarTitle">My Orders</div>
+            <div class="topbar-sub">Manage and track your shipments</div>
+          </div>
+          <div class="topbar-actions">
+            <button
+              class="btn btn-primary"
+              onclick="openSection('place-order')"
+            >
+              + New Order
+            </button>
+          </div>
+        </header>
+        <div class="notif-banner" id="notifBanner">
+          <div style="font-weight: 700; font-size: 13px" id="notifTitle">
+            Update
+          </div>
+          <div style="font-size: 12px; color: #92400e" id="notifDesc"></div>
+        </div>
+
+        <div class="page-content">
+          
+          <section class="page-section active" id="section-orders">
+            <div class="flex-between mb-16">
+              <h2 style="font-size: 20px; font-weight: 700">My Orders</h2>
+              <button class="btn btn-sm" onclick="loadOrders()">
+                <img src="/icons/refresh-cw.svg" class="icon icon-sm" /> Refresh
+              </button>
+            </div>
+
+            <div id="ordersList">
+              <div
+                class="skeleton"
+                style="height: 90px; margin-bottom: 10px; border-radius: 12px"
+              ></div>
+              <div
+                class="skeleton"
+                style="height: 90px; margin-bottom: 10px; border-radius: 12px"
+              ></div>
+              <div
+                class="skeleton"
+                style="height: 90px; border-radius: 12px"
+              ></div>
+            </div>
+          </section>
+
+          <section class="page-section" id="section-place-order">
+            <div class="flex-between mb-16">
+              <h2 style="font-size: 20px; font-weight: 700">Place New Order</h2>
+            </div>
+
+            <div
+              class="form-grid"
+              style="
+                grid-template-columns: 1fr 1fr;
+                gap: 24px;
+                align-items: start;
+              "
+            >
+              <!-- Map Column -->
+              <div class="card">
+                <div class="card-title mb-8">Set Pickup & Dropoff</div>
+                <div class="map-instruction">
+                  <input
+                    type="text"
+                    id="mapSearchInput"
+                    class="form-input"
+                    placeholder="Search address (e.g. Mumbai)..."
+                    style="margin-bottom: 8px"
+                  />
+                  1. Search or click the map to set
+                  <strong>Pickup</strong>.<br />
+                  2. Search or click again to set <strong>Dropoff</strong>.
+                </div>
+                <div class="map-container mb-16" style="height: 380px">
+                  <div id="orderMap"></div>
+                </div>
+                <div style="display: flex; gap: 10px">
+                  <button class="btn flex-1" onclick="resetMapPins()">
+                    Clear Pins
+                  </button>
+                  <button
+                    class="btn btn-primary flex-1"
+                    id="mapModeBtn"
+                    onclick="toggleMapMode()"
+                  >
+                    Setting: PICKUP
+                  </button>
+                </div>
+              </div>
+
+            
+              <div class="card">
+                <div class="card-title mb-16 border-bottom pb-16">
+                  Package Details
+                </div>
+                <form id="orderForm">
+                  <div class="form-group">
+                    <label class="form-label">Pickup Address</label>
+                    <input
+                      class="form-input"
+                      type="text"
+                      id="pickupAddress"
+                      readonly
+                      placeholder="Click on map to set…"
+                    />
+                    <input type="hidden" id="pickupLat" />
+                    <input type="hidden" id="pickupLng" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Dropoff Address</label>
+                    <input
+                      class="form-input"
+                      type="text"
+                      id="dropoffAddress"
+                      readonly
+                      placeholder="Click on map to set…"
+                    />
+                    <input type="hidden" id="dropoffLat" />
+                    <input type="hidden" id="dropoffLng" />
+                  </div>
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label class="form-label">Package Description</label>
+                      <input
+                        class="form-input"
+                        type="text"
+                        id="orderPackage"
+                        placeholder="e.g. Electronics"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Weight</label>
+                      <input
+                        class="form-input"
+                        type="text"
+                        id="orderWeight"
+                        placeholder="e.g. 5 kg"
+                      />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Priority</label>
+                    <select class="form-select" id="orderPriority">
+                      <option value="normal">Normal</option>
+                      <option value="express">Express</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    class="btn btn-primary btn-full btn-lg"
+                    id="placeOrderBtn"
+                  >
+                    Place Order
+                  </button>
+                </form>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" id="section-track">
+            <div class="flex-between mb-16">
+              <div>
+                <h2 style="font-size: 20px; font-weight: 700">
+                  Track Your Package
+                </h2>
+                <div class="text-sm text-muted mt-4">
+                  Your tracking ID is found in your orders list
+                </div>
+              </div>
+            </div>
+
+            <div class="track-search-bar">
+              <input
+                class="form-input flex-1"
+                type="text"
+                id="trackingInput"
+                placeholder="Enter Tracking ID  (e.g. LT-ABC123-XYZ)"
+              />
+              <button class="btn btn-primary" onclick="trackById()">
+                Track
+              </button>
+            </div>
+
+            <div id="trackResult" style="display: none">
+              <div class="card mb-16">
+                <div class="flex-between mb-20">
+                  <div>
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text-3);
+                        font-weight: 600;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                      "
+                    >
+                      Tracking ID
+                    </div>
+                    <div
+                      style="font-size: 22px; font-weight: 800"
+                      id="trackIdDisplay"
+                    >
+                      —
+                    </div>
+                  </div>
+                  <div id="trackStatusBadge"></div>
+                </div>
+
+                <div class="milestones-row" id="milestonesRow"></div>
+
+                <div
+                  id="lastEventCard"
+                  style="
+                    margin-top: 16px;
+                    padding-top: 16px;
+                    border-top: 1px solid var(--border);
+                  "
+                ></div>
+
+                <div
+                  id="driverInfoCard"
+                  style="display: none"
+                  class="card mt-16"
+                >
+                  <div class="card-title mb-12 border-bottom pb-12">
+                    Assigned Truck
+                  </div>
+                  <div id="driverInfoContent" style="font-size: 13px"></div>
+                </div>
+              </div>
+
+              <div class="card mt-16">
+                <div class="map-note">
+                  Tracking shows major milestones (Pickup, Transit Hub, Dropoff)
+                  — not continuous GPS for privacy.
+                </div>
+                <div class="map-container">
+                  <div id="trackMap"></div>
+                </div>
+              </div>
+
+              <div class="card mt-16">
+                <div class="card-title mb-16 border-bottom pb-16">
+                  Event History
+                </div>
+                <ul class="timeline" id="trackTimeline"></ul>
+              </div>
+            </div>
+
+            <div id="trackEmpty" style="display: none">
+              <div class="empty-state">
+                <div class="empty-title">Package Not Found</div>
+                <div class="text-sm text-muted">
+                  Double-check the tracking ID and try again. IDs look like
+                  <code>LT-XXXXX-YYY</code>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    
+    <div class="modal-overlay" id="logoutModal">
+      <div class="modal" style="max-width: 350px">
+        <div class="modal-header border-bottom pb-12 mb-16">
+          <div class="modal-title">Sign Out</div>
+          <button class="modal-close" onclick="modal.close('logoutModal')">
+            ✕
+          </button>
+        </div>
+        <p
+          style="
+            color: var(--text-2);
+            margin-bottom: 24px;
+            font-size: 14px;
+            text-align: center;
+          "
+        >
+          Are you sure you want to sign out of LogiTrack?
+        </p>
+        <div class="flex-between" style="gap: 12px">
+          <button class="btn flex-1" onclick="modal.close('logoutModal')">
+            Cancel
+          </button>
+          <button class="btn btn-danger flex-1" onclick="logout()">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="/utils.js"></script>
+    <script src="/user.js"></script>
+  </body>
+</html>

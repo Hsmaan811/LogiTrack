@@ -1,0 +1,14 @@
+{
+  "name": "logistics-tracker",
+  "version": "1.0.0",
+  "description": "Real-time logistics tracking system with admin, driver, and user dashboards",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "seed": "node seed.js"
+  },
+  "keywords": ["logistics", "tracking", "realtime"],
+  "author": "",
+  "license": "ISC"
+}
