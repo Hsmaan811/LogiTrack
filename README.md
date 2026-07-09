@@ -1,7 +1,6 @@
 # Logistics Tracker
 
-A real-time logistics tracking system with separate dashboards for admins, drivers, and users. The app uses Express.js, Socket.IO, MongoDB, and a browser-based frontend to support delivery assignment, live tracking, route simulation, and status updates.
-
+A full-stack, real-time fleet logistics tracking platform that utilizes Socket.IO and Leaflet.js to seamlessly synchronize delivery workflows between administrators, drivers, and customers.
 ## Features
 
 - Admin dashboard for managing drivers, deliveries, and live tracking
