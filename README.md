@@ -1,56 +1,172 @@
-# LogiTrack 
+# Logistics Tracker
 
-LogiTrack is a modern, full-stack logistics and fleet management platform designed to streamline supply chain operations. 
-It provides real-time visibility into vehicle locations, optimizes delivery routes, and simplifies order management for dispatchers and drivers alike.
+A real-time logistics tracking system with separate dashboards for admins, drivers, and users. The app uses Express.js, Socket.IO, MongoDB, and a browser-based frontend to support delivery assignment, live tracking, route simulation, and status updates.
 
+## Features
 
+- Admin dashboard for managing drivers, deliveries, and live tracking
+- Driver dashboard for viewing assigned deliveries, updating delivery status, and sharing live location
+- User dashboard for placing orders and tracking shipments
+- Real-time updates with Socket.IO
+- MongoDB-backed data models for users, deliveries, and tracking events
+- Route generation and simulation support for delivery movement
+- Responsive browser UI with separate pages for each role
 
-## 🚀 Features
+## Tech Stack
 
-* **Real-Time Fleet Tracking:** Live asset and vehicle mapping utilizing WebSockets and map API integration.
-* **Smart Route Optimization:** Dynamic routing algorithms to minimize fuel consumption and delivery times.
-* **Interactive Dashboard:** Comprehensive analytics for dispatchers to monitor driver statuses, completion rates, and active shipments.
-* **Automated Notifications:** Instant alerts for geofencing, delayed shipments, and milestone completions.
-* **Role-Based Access Control (RBAC):** Secure login portals for Administrators, Dispatchers, and Drivers.
+- Node.js
+- Express.js
+- Socket.IO
+- MongoDB with Mongoose
+- Vanilla JavaScript
+- Leaflet and Leaflet Routing Machine for maps
 
----
-
-## 🛠️ Tech Stack
-
-**Frontend:**
-* Framework: React.js / Next.js
-* Styling: Tailwind CSS / Material UI
-* State Management: Redux Toolkit / Context API
-
-**Backend:**
-* Runtime: Node.js
-* Framework: Express.js
-* Real-time Communication: Socket.io
-
-**Database & Cloud:**
-* Primary Database: MongoDB / PostgreSQL
-* Caching: Redis (for rapid tracking data retrieval)
-* Storage: AWS S3 (for delivery receipts and documentation)
-
-**APIs & Third-Party Services:**
-* Mapping/Routing: Google Maps API / Leaflet / Mapbox
-* Authentication: JWT (JSON Web Tokens) / Auth0
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```text
-logitrack/
-├── client/                 # Frontend application
-│   ├── src/
-│   │   ├── components/     # Reusable UI components (Maps, Navbar, etc.)
-│   │   ├── pages/          # Dashboard, Login, Analytics views
-│   │   └── context/        # Global state management
-├── server/                 # Backend application
-│   ├── config/             # Database and environment configurations
-│   ├── controllers/        # Business logic for routes
-│   ├── models/             # Database schemas (User, Vehicle, Shipment)
-│   ├── routes/             # API Endpoints
-│   └── server.js           # Entry point
-└── README.md
+logistics-tracker/
+  client/
+    admin.html
+    admin.js
+    driver.html
+    driver.js
+    index.html
+    login.html
+    register.html
+    styles.css
+    user.html
+    user.js
+    utils.js
+    icons/
+  server/
+    admin-routes.js
+    auth-middleware.js
+    auth-routes.js
+    db.js
+    delivery-model.js
+    driver-routes.js
+    server.js
+    socket-handler.js
+    tracking-model.js
+    user-model.js
+    user-routes.js
+  seed.js
+  server.js
+  package.json
+```
+
+## Requirements
+
+- Node.js 18+ recommended
+- MongoDB database
+- Internet connection for the map tiles and Socket.IO client CDN used by the frontend pages
+
+## Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create a `.env` file in the project root with the required variables:
+
+```env
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=your_jwt_secret
+PORT=5000
+```
+
+3. Seed the database if needed:
+
+```bash
+npm run seed
+```
+
+4. Start the app:
+
+```bash
+npm start
+```
+
+5. Open the app in your browser:
+
+- Admin: `http://localhost:5000/admin.html`
+- Driver: `http://localhost:5000/driver.html`
+- User: `http://localhost:5000/user.html`
+
+## How It Works
+
+### Server
+
+The Express app in `server/server.js`:
+
+- connects to MongoDB
+- serves the static frontend from `client/`
+- mounts API routes under `/api/*`
+- sets up Socket.IO for realtime events
+- provides a health check endpoint
+
+### Client
+
+The browser app in `client/`:
+
+- uses `fetch()` through shared helpers in `client/utils.js`
+- stores auth data in `localStorage`
+- creates a Socket.IO client connection with `createSocket()`
+- updates the UI with realtime delivery and location events
+
+## Realtime Events
+
+Some of the main Socket.IO events used in the app:
+
+- `driver:send-location`
+- `driver:location-update`
+- `driver:online`
+- `driver:offline`
+- `delivery:assigned`
+- `delivery:updated`
+- `delivery:milestone`
+- `delivery:checkpoint`
+
+## API Overview
+
+### Auth
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/profile`
+
+### Driver
+
+- `GET /api/driver/deliveries`
+- `GET /api/driver/deliveries/active`
+- `PUT /api/driver/deliveries/:id/status`
+- `PUT /api/driver/location`
+- `PUT /api/driver/availability`
+- `PUT /api/driver/deliveries/:id/route`
+- `POST /api/driver/deliveries/:id/simulate`
+- `POST /api/driver/simulate/stop`
+
+### User
+
+- `GET /api/user/orders`
+- `POST /api/user/orders`
+- `GET /api/user/orders/:id`
+- `GET /api/user/track/:trackingId`
+
+### Admin
+
+- `GET /api/admin/stats`
+- `GET /api/admin/drivers`
+- `GET /api/admin/deliveries`
+
+## Notes
+
+- The root `server.js` starts the app by loading `server/server.js`.
+- If you rename folders again, update the static path and the root entry file accordingly.
+- The app currently uses the Socket.IO browser client from a CDN in the HTML pages.
+
+## License
+
+ISC
