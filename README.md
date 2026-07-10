@@ -21,12 +21,12 @@ A full-stack, real-time fleet logistics tracking platform that utilizes Socket.I
 - Vanilla JavaScript
 - Leaflet and Leaflet Routing Machine for maps
   
-#Images
-![Landingpage](assets/landingpage.jpg)
-![admin](assets/admindash.png)
-![adminlivedash](assets/liveadmin.jpg)
-![order](assets/order.jpg)
-![packagedriver](assets/packagesdriver.jpg)
+# Images
+![Landingpage](Assets/landingpage.jpg)
+![admin](Assets/admindash.png)
+![adminlivedash](Assets/liveadmin.jpg)
+![order](Assets/order.jpg)
+![packagedriver](Assets/packagesdriver.jpg)
 
 ## Project Structure
 
