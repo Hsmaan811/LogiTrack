@@ -23,7 +23,7 @@ A full-stack, real-time fleet logistics tracking platform that utilizes Socket.I
   
 # Images
 ![Landingpage](Assets/landingpage.jpg)
-![admin](Assets/admindash.png)
+![admin](Assets/dashadmin.png)
 ![adminlivedash](Assets/liveadmin.jpg)
 ![order](Assets/order.jpg)
 ![packagedriver](Assets/packagesdriver.jpg)
